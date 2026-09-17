@@ -66,48 +66,12 @@ func (s *AddWatermarkStep) Execute(ctx context.Context, input any) (any, error) 
 	if userID == "" {
 		userID = strings.TrimSpace(GetUserID(ctx))
 	}
-	if userID == "" {
-		s.logger.Debug("Skip watermark: missing user id")
-		return vctx, nil
-	}
 
-	// nonMember, reason := s.isNonMember(ctx, userID)
-	// if !nonMember {
-	// 	s.logger.Info("Skip watermark",
-	// 		zap.String("user_id", userID),
-	// 		zap.String("reason", reason),
-	// 		zap.String("video_id", vctx.VideoID),
-	// 	)
-	// 	return vctx, nil
-	// }
-
-	filter := s.buildDrawtextFilter()
-
-	outPath := watermarkedOutputPath(videoPath)
-	tmpPath := watermarkTempOutputPath(outPath)
-
-	if rmErr := os.Remove(tmpPath); rmErr != nil && !os.IsNotExist(rmErr) {
-		return nil, fmt.Errorf("remove watermark tmp: %w", rmErr)
-	}
-	if rmErr := os.Remove(outPath); rmErr != nil && !os.IsNotExist(rmErr) {
-		return nil, fmt.Errorf("remove existing watermark output: %w", rmErr)
-	}
-
-	s.logger.Info("Applying watermark for non-member",
+	// Self-hosted: never burn a watermark into the video.
+	s.logger.Info("Skip watermark: self-hosted open access",
 		zap.String("user_id", userID),
 		zap.String("video_id", vctx.VideoID),
-		zap.String("input", videoPath),
-		zap.String("output", outPath),
 	)
-
-	if err := s.runFFmpegWatermark(ctx, videoPath, tmpPath, filter); err != nil {
-		return nil, err
-	}
-	if err := os.Rename(tmpPath, outPath); err != nil {
-		return nil, fmt.Errorf("rename watermark output: %w", err)
-	}
-
-	vctx.VideoPath = outPath
 	return vctx, nil
 }
 

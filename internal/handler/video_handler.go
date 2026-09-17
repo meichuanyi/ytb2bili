@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -231,6 +233,7 @@ type resumeRequest struct {
 	SpeechSynthesisConfig *workflow.SpeechSynthesisConfig `json:"speech_synthesis_config"`
 	TranslationConfig     *workflow.TranslationConfig     `json:"translation_config"`
 	RestartFromStep       string                          `json:"restart_from_step"`
+	ForceRedownload       bool                            `json:"force_redownload"`
 }
 
 func buildResumeVideoContext(req resumeRequest) *workflow.VideoContext {
@@ -347,6 +350,27 @@ func (h *VideoHandler) resumeVideo(c *gin.Context) {
 		if err := h.videoService.ResetStepsFrom(c.Request.Context(), video.VideoID, req.RestartFromStep); err != nil {
 			BadRequest(c, "重置步骤失败: "+err.Error())
 			return
+		}
+	}
+
+	// 强制重新下载：删除本地视频文件并清空 video_path，
+	// 否则下载步骤会因「文件已存在」被跳过。
+	if req.ForceRedownload {
+		if p := strings.TrimSpace(video.VideoPath); p != "" {
+			_ = os.Remove(p)
+			_ = os.Remove(filepath.Join(filepath.Dir(p), "dubbed_"+filepath.Base(p)))
+		}
+		if err := h.videoService.Update(c.Request.Context(), video.ID, map[string]interface{}{"video_path": ""}); err != nil {
+			h.logger.Error("清空 video_path 失败", zap.String("video_id", video.VideoID), zap.Error(err))
+			BadRequest(c, "重置视频文件失败")
+			return
+		}
+		video.VideoPath = ""
+		if strings.TrimSpace(req.RestartFromStep) == "" {
+			req.RestartFromStep = "DownloadVideo"
+		}
+		if err := h.videoService.ResetStepsFrom(c.Request.Context(), video.VideoID, "DownloadVideo"); err != nil {
+			h.logger.Warn("重置下载步骤失败", zap.String("video_id", video.VideoID), zap.Error(err))
 		}
 	}
 

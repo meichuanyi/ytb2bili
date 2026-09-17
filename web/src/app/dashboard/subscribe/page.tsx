@@ -75,6 +75,33 @@ export default function VideoListPage() {
   const [appliedSearchTerm, setAppliedSearchTerm] = useState('');
   const [channelStatusFilter, setChannelStatusFilter] = useState<ChannelStatusFilter>('all');
   const [updatingChannelId, setUpdatingChannelId] = useState<number | null>(null);
+
+  // 添加频道
+  const [addInput, setAddInput] = useState('');
+  const [addingChannel, setAddingChannel] = useState(false);
+  const [addError, setAddError] = useState('');
+
+  const handleAddChannel = async () => {
+    if (!currentUser?.id || !addInput.trim()) return;
+    setAddingChannel(true);
+    setAddError('');
+    try {
+      await api.addYouTubeSubscription({
+        user_id: currentUser.id,
+        channel_input: addInput.trim(),
+      });
+      setAddInput('');
+      setChannelsPage(1);
+      setChannelsHasMore(true);
+      fetchChannels(1, false);
+    } catch (error: any) {
+      console.error('Failed to add channel:', error);
+      const serverMsg = error?.response?.data?.message || error?.response?.message || error?.message;
+      setAddError(serverMsg || t('添加频道失败，请检查链接是否正确'));
+    } finally {
+      setAddingChannel(false);
+    }
+  };
   
   const observerTarget = useRef<HTMLDivElement>(null);
   const channelsObserverTarget = useRef<HTMLDivElement>(null);
@@ -594,6 +621,38 @@ export default function VideoListPage() {
       )}
 
       {/* Channels Tab Content */}
+      {/* 添加频道 */}
+      <div className="rounded-lg border border-border bg-card p-4">
+        <h3 className="font-semibold mb-1">{t('Add channel subscription')}</h3>
+        <p className="text-sm text-muted-foreground mb-3">
+          {t('粘贴 YouTube 频道链接、@句柄或视频链接即可订阅（无需登录 YouTube 账号）')}
+        </p>
+        <div className="flex items-center space-x-2">
+          <input
+            type="text"
+            placeholder={t('YouTube 频道链接或 @句柄，如 https://www.youtube.com/@频道名')}
+            value={addInput}
+            onChange={(e) => {
+              setAddInput(e.target.value);
+              if (addError) setAddError('');
+            }}
+            onKeyDown={(e) => e.key === 'Enter' && handleAddChannel()}
+            className="flex-1 px-3 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+          <button
+            onClick={handleAddChannel}
+            disabled={addingChannel || !addInput.trim()}
+            className="flex items-center space-x-1 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
+          >
+            {addingChannel ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            <span>{addingChannel ? t('订阅中...') : t('订阅')}</span>
+          </button>
+        </div>
+        {addError ? (
+          <p className="mt-2 text-sm text-red-600">{addError}</p>
+        ) : null}
+      </div>
+
       {activeTab === 'channels' && (
         <>
           {/* Search */}

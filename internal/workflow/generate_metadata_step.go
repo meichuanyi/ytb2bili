@@ -96,15 +96,16 @@ func (s *GenerateMetadataStep) resolveMetadataModel(ctx context.Context, userID 
 }
 
 func (s *GenerateMetadataStep) resolveWatermarkPromoEnabled(ctx context.Context, userID string) bool {
+	// Default OFF: only append promo when the user explicitly sets watermark_promo_enabled=1.
 	if s.userSettings == nil || !s.userSettings.IsEnabled() || strings.TrimSpace(userID) == "" {
-		return true
+		return false
 	}
 	settings, err := s.userSettings.GetSettings(ctx, userID)
 	if err != nil {
-		s.logger.Warn("加载上传宣传文案设置失败，回退默认开启", zap.String("user_id", userID), zap.Error(err))
-		return true
+		s.logger.Warn("加载上传宣传文案设置失败，回退默认关闭", zap.String("user_id", userID), zap.Error(err))
+		return false
 	}
-	return strings.TrimSpace(settings[storemodel.UserSettingKeyWatermarkPromoEnabled]) != "0"
+	return strings.TrimSpace(settings[storemodel.UserSettingKeyWatermarkPromoEnabled]) == "1"
 }
 
 // Execute 执行元数据生成

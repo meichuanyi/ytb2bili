@@ -1,197 +1,108 @@
-# ============================================
-# Git worktrees
-# ============================================
-.worktrees/
-
-# ============================================
-# 数据库文件
-# ============================================
-*.db
-*.db-shm
-*.db-wal
-
-# ============================================
-# 配置文件 (保留示例文件)
-# ============================================
-
-
-internal/server/out/
-
-cookies/
-# ============================================
-# 运行时生成的文件（保留在根目录，但不提交到git）
-# ============================================
-cookies.txt
-cookies_backup.txt
-*.log
-server.log
-upload_test.log
-
-# ============================================
-# IDE 文件
-# ============================================
-.idea/
-.vscode/
-*.swp
-*.swo
-*.sublime-*
-
-# ============================================
-# 系统文件
-# ============================================
-.DS_Store
-Thumbs.db
-bin/
-
-
-# ============================================
-# 日志文件
-# ============================================
+node_modules/
+venv/
+.venv/
+env/
+target/
+dist/
+out/
+__pycache__/
+*.pyc
+.next/
+.nuxt/
+coverage/
+downloads/
+datasets/
+data/
 logs/
 *.log
-subtitles/
-downloads/
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+*.rar
+*.parquet
+*.ckpt
+*.pth
+*.pt
+*.safetensors
+*.onnx
+*.h5
+*.pdparams
+pretrained_models/
+wheels/
+.cache/
+.DS_Store
+/bin/ytb2bili-linux-amd64
+/downloads/3Q-n_-xQfUQ/3Q-n_-xQfUQ.f616.mp4.part
+/downloads/s-brHQL16rE/s-brHQL16rE.mp4
+/downloads/s-brHQL16rE/s-brHQL16rE.mp3
+/downloads/EvRmra6O5FY/EvRmra6O5FY.mp3
+/downloads/EvRmra6O5FY/EvRmra6O5FY.mp4
+/downloads/wB6ObQt__uI/wB6ObQt__uI.mp4
+/downloads/wB6ObQt__uI/wB6ObQt__uI.mp3
+/downloads/Be4NKW9fxgc/Be4NKW9fxgc.mp3
+/downloads/Be4NKW9fxgc/Be4NKW9fxgc.mp4
+/downloads/KS4vxOiq4L0/KS4vxOiq4L0.mp4
+/downloads/QVCkRBAUrSo/QVCkRBAUrSo.mp4
+/downloads/mq0uFsTAPHA/mq0uFsTAPHA.mp4
+/downloads/oX4DHLUOFUE/oX4DHLUOFUE.f401.mp4.part
+/downloads/RAv-JRytCBI/RAv-JRytCBI.mp4
+/downloads/VZjai9BpRWU/VZjai9BpRWU.mp4
+/downloads/UGeECzDzlD8/UGeECzDzlD8.mp4
+/downloads/I7i798VCm6w/I7i798VCm6w.mp3
+/downloads/I7i798VCm6w/I7i798VCm6w.mp4
+/downloads/ZRvnTrmQHsM/ZRvnTrmQHsM.mp4
+/downloads/ajH6YVhdOZU/ajH6YVhdOZU.mp3
+/downloads/ajH6YVhdOZU/ajH6YVhdOZU.mp4
+/downloads/P4Ijq-IJhE8/P4Ijq-IJhE8.f616.mp4.part
+/downloads/https:/www.youtube.com/shorts/Afu2RdpWXAk/Afu2RdpWXAk.mp4
+/downloads/https:/www.youtube.com/shorts/kRSjjb_tCo4/kRSjjb_tCo4.mp4
+/downloads/https:/www.youtube.com/shorts/-KL3L25rdqI/-KL3L25rdqI.mp4
+/downloads/https:/www.youtube.com/shorts/CjK2VCrhp8Y/CjK2VCrhp8Y.mp4
+/downloads/https:/www.youtube.com/shorts/Wn4xwnPLH9U/Wn4xwnPLH9U.mp4
+/downloads/https:/www.youtube.com/shorts/zBJbeCipS1I/zBJbeCipS1I.mp4
+/downloads/https:/www.youtube.com/shorts/3ptPDitYf4I/3ptPDitYf4I.mp4
+/downloads/881U8Ya0QKI/881U8Ya0QKI.mp4
+/downloads/CvQF514lHa4/CvQF514lHa4.mp4
+/downloads/pbYtqXbBj_c/pbYtqXbBj_c.mp4
+/downloads/pbYtqXbBj_c/pbYtqXbBj_c.mp3
+/downloads/Wd_iUsteoaw/Wd_iUsteoaw.mp4
+/downloads/sPUonzHWZEY/sPUonzHWZEY.mp3
+/downloads/sPUonzHWZEY/sPUonzHWZEY.mp4
+/downloads/phHyf4RvU5Q/phHyf4RvU5Q.mp4
+/downloads/phHyf4RvU5Q/phHyf4RvU5Q.mp3
+/downloads/v-Wg2Z7nc-o/v-Wg2Z7nc-o.mp4
+/downloads/Tvh0gSIK4CA/Tvh0gSIK4CA.mp4
+/downloads/zopLK4MtWPA/zopLK4MtWPA.mp4
+/downloads/v824SHV6COE/v824SHV6COE.mp3
+/downloads/v824SHV6COE/v824SHV6COE.mp4
+/downloads/nbUwL0-TswI/nbUwL0-TswI.mp3
+/downloads/nbUwL0-TswI/nbUwL0-TswI.mp4
+/downloads/02z49hkJO-4/02z49hkJO-4.mp4
+/downloads/02z49hkJO-4/02z49hkJO-4.mp3
+/downloads/GWBsa1wM-vs/GWBsa1wM-vs.mp4
+/downloads/x1RLtnF2To4/x1RLtnF2To4.mp4
+/downloads/mlD3lvdY2ek/mlD3lvdY2ek.mp3
+/downloads/mlD3lvdY2ek/mlD3lvdY2ek.mp4
+/downloads/exVzP0nHoxg/exVzP0nHoxg.mp4
+/downloads/exVzP0nHoxg/exVzP0nHoxg.mp3
+/downloads/TdKK1f21xvA/TdKK1f21xvA.mp3
+/downloads/TdKK1f21xvA/TdKK1f21xvA.mp4
+/downloads/4GU85zPjKfw/4GU85zPjKfw.mp4
+/downloads/4GU85zPjKfw/4GU85zPjKfw.mp3
+/downloads/HV7aW59s0p8/HV7aW59s0p8.mp4
+/downloads/HV7aW59s0p8/HV7aW59s0p8.mp3
+/ytb2bili
+/docker/ytb2bili-linux-amd64
+/ytb2bili-local.tar
+/web/node_modules/@next/swc-linux-x64-musl/next-swc.linux-x64-musl.node
+/web/node_modules/@next/swc-linux-x64-gnu/next-swc.linux-x64-gnu.node
+/web/.next/cache/webpack/client-production/0.pack
+/web/.next/cache/webpack/client-production/18.pack
+/web/.next/cache/webpack/server-production/9.pack
 
-# ============================================
-# 构建产物
-# ============================================
-
-dist/
-build/
-
-# Next.js 构建产物
-.next/
-*/_next/
-
-
-# ============================================
-# 编译产物（保留在根目录，但不提交到git）
-# ============================================
-*.exe
-*.exe~
-yt-dlp.exe
-*.dll
-*.so
-*.dylib
-
-# ============================================
-# 依赖
-# ============================================
-node_modules/
-vendor/
-
-# ============================================
-# 本地演示项目 (保持私有)
-# ============================================
-
-# ============================================
-# 输出目录
-# ============================================
-output/
-
-# ============================================
-# 临时文件
-# ============================================
-*.tmp
-*.temp
-
-# ============================================
-# 环境变量文件（敏感信息）
-# ============================================
-.env
-.env.local
-configs/.env
-configs/.env.local
-
-# Firebase 凭证文件（敏感）
-*-firebase-adminsdk-*.json
-trans-video-*.json
-ytb2bili-*.json
-
-# ============================================
-# Next.js 前端
-# ============================================
-web/.next/
-web/out/
-web/.env.local
-web/.firebase/
-web/node_modules/
-
-# ============================================
-# Go 构建产物
-# ============================================
-ytb2bili
-ytb2bili-*
-bin/
-*.exe
-!yt-dlp.exe
-
-# ============================================
-# 下载和缓存目录
-# ============================================
-downloads/
-subtitles/
-cookies/
-
-# ============================================
-# 上传文件
-# ============================================
-uploads/
-media/data/
-data/
-
-# ============================================
-# Claude Code 配置
-# ============================================
-.claude/
-
-# ============================================
-# 测试覆盖率
-# ============================================
-*.out
-coverage.html
-coverage/
-
-# ============================================
-# Docker
-# ============================================
-.dockerignore
-config.toml.backup
-# 注意: *.exe 已在上面统一忽略（保留在根目录）
-
-# ============================================
-# 编译的前端资源 (运行时嵌入)
-# ============================================
-internal/web/bili-up-web/out/
-
-# ============================================
-# AI Agent 配置
-# ============================================
-.augment-guidelines
-
-# ============================================
-# Go 工具
-# ============================================
-# Keep air for dev mode
-# !air.toml
-
-# ============================================
-# Windows 临时文件
-# ============================================
-*.~
-*.bak
-
-# ============================================
-# macOS
-# ============================================
-.AppleDouble
-.LSOverride
-
-# ============================================
-# Linux
-# ============================================
-*~
-.nfs*
-
-# Tools
-reset_password.go
+# 本地凭据与部署配置（不入库，使用 *.example 模板）
+/config.toml
+/docker/config.toml
+/cookies/

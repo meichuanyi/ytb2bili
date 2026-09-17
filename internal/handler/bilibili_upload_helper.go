@@ -3,7 +3,9 @@ package handler
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/difyz9/ytb2bili/internal/analytics"
@@ -25,6 +27,20 @@ func UploadVideoToBilibili(ctx context.Context, logger *zap.Logger, biliService 
 	}
 	if video.VideoPath == "" {
 		return nil, fmt.Errorf("视频文件路径为空，无法上传")
+	}
+	// 上传前必须确认已翻译出中文，避免原片当转载投稿。
+	if strings.TrimSpace(video.GeneratedDesc) == "通过自动化工具上传的视频" ||
+		strings.TrimSpace(video.GeneratedDesc) == "" {
+		return nil, fmt.Errorf("上传前校验失败: 简介未生成中文内容，禁止上传")
+	}
+	if !hasChineseRunes(video.GeneratedTitle) && !hasChineseRunes(video.Title) {
+		return nil, fmt.Errorf("上传前校验失败: 标题缺少中文，禁止上传")
+	}
+	if !hasChineseRunes(video.GeneratedDesc) {
+		return nil, fmt.Errorf("上传前校验失败: 简介缺少中文，禁止上传")
+	}
+	if !hasZhSubtitleBesideVideo(video.VideoPath) {
+		return nil, fmt.Errorf("上传前校验失败: 未找到中文字幕，禁止上传原片")
 	}
 	if userID == "" {
 		userID = video.UserID
@@ -93,4 +109,29 @@ func fallbackUploadString(value, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func hasChineseRunes(s string) bool {
+	for _, r := range s {
+		if r >= 0x4e00 && r <= 0x9fff {
+			return true
+		}
+	}
+	return false
+}
+
+func hasZhSubtitleBesideVideo(videoPath string) bool {
+	dir := filepath.Dir(videoPath)
+	base := strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath))
+	for _, p := range []string{
+		filepath.Join(dir, "zh.srt"),
+		filepath.Join(dir, base+".zh.srt"),
+		filepath.Join(dir, base+".zh-CN.srt"),
+	} {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() && st.Size() > 0 {
+			return true
+		}
+	}
+	matches, _ := filepath.Glob(filepath.Join(dir, "*.zh.srt"))
+	return len(matches) > 0
 }

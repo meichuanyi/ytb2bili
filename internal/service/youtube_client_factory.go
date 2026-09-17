@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/difyz9/ytb2bili/internal/config"
@@ -46,15 +47,33 @@ func NewYouTubeClientFactory(logger *zap.Logger, cfg *config.AppConfig) *YouTube
 		Transport: transport,
 	}
 
+	// 从 [youtube] 配置注入真实 OAuth 凭据。
+	// 之前这里把 ClientID/ClientSecret/RedirectURL 硬编码为空字符串，
+	// 导致授权 URL 缺少 client_id、token 交换必然返回 invalid_client，YouTube 登录必坏。
+	clientID := ""
+	clientSecret := ""
+	redirectURL := ""
+	if cfg != nil {
+		clientID = strings.TrimSpace(cfg.Youtube.ClientID)
+		clientSecret = strings.TrimSpace(cfg.Youtube.ClientSecret)
+		redirectURL = strings.TrimSpace(cfg.Youtube.RedirectURL)
+	}
+
 	oauthConfig := &oauth2.Config{
-		ClientID:     "",
- 		ClientSecret: "",
-		RedirectURL:  "",
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		RedirectURL:  redirectURL,
 		Scopes:       []string{youtube.YoutubeReadonlyScope},
 		Endpoint:     google.Endpoint,
 	}
 
 	oauthCtx := context.WithValue(context.Background(), oauth2.HTTPClient, httpClient)
+
+	if clientID == "" || clientSecret == "" || redirectURL == "" {
+		logger.Warn("YouTube OAuth 凭据未完整配置（[youtube] client_id/client_secret/redirect_url），授权流程不可用")
+	} else {
+		logger.Info("YouTube OAuth 配置已加载", zap.String("redirect_url", redirectURL))
+	}
 
 	return &YouTubeClientFactory{
 		logger:      logger,
@@ -70,6 +89,18 @@ func (f *YouTubeClientFactory) OAuthConfig() *oauth2.Config {
 		return nil
 	}
 	return f.oauthConfig
+}
+
+// IsConfigured 报告 OAuth 凭据（client_id/client_secret/redirect_url）是否完整配置。
+// oauthConfig 始终非 nil（未配置时各字段为空），调用方需用此方法区分
+// “未配置”与“已配置”，避免用空凭据生成授权 URL / 交换 token。
+func (f *YouTubeClientFactory) IsConfigured() bool {
+	if f == nil || f.oauthConfig == nil {
+		return false
+	}
+	return f.oauthConfig.ClientID != "" &&
+		f.oauthConfig.ClientSecret != "" &&
+		f.oauthConfig.RedirectURL != ""
 }
 
 func (f *YouTubeClientFactory) OAuthContext() context.Context {

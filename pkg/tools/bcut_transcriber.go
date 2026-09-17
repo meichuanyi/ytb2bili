@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -153,48 +155,23 @@ func (t *BcutTranscriberTool) Call(ctx context.Context, input string) (string, e
 	t.logger.Info("Starting BCut transcription",
 		zap.String("file", filePath))
 
-	// 读取文件
-	fileData, err := os.ReadFile(filePath)
-	if err != nil {
-		return "", fmt.Errorf("failed to read file: %w", err)
+	result, err := t.transcribeViaBcut(ctx, filePath)
+	if err != nil || result == nil || len(result.Segments) == 0 {
+		reason := err
+		if reason == nil {
+			reason = fmt.Errorf("bcut returned empty segments")
+		}
+		t.logger.Warn("Bcut transcription unavailable, falling back to local whisper", zap.Error(reason))
+		result, err = t.transcribeLocalWhisper(ctx, filePath)
+		if err != nil {
+			return "", fmt.Errorf("bcut and local whisper both failed: bcut=%v whisper=%w", reason, err)
+		}
 	}
 
-	// 1. 申请上传
-	t.logger.Info("Requesting upload...")
-	uploadResp, err := t.requestUpload(ctx, fileData)
-	if err != nil {
-		return "", fmt.Errorf("request upload failed: %w", err)
-	}
-
-	// 2. 分片上传
-	t.logger.Info("Uploading file parts...",
-		zap.Int("parts", len(uploadResp.Data.UploadURLs)),
-		zap.Int("size_kb", uploadResp.Data.Size/1024))
-	etags, err := t.uploadParts(ctx, fileData, uploadResp)
-	if err != nil {
-		return "", fmt.Errorf("upload parts failed: %w", err)
-	}
-
-	// 3. 提交上传
-	t.logger.Info("Committing upload...")
-	downloadURL, err := t.commitUpload(ctx, uploadResp, etags)
-	if err != nil {
-		return "", fmt.Errorf("commit upload failed: %w", err)
-	}
-
-	// 4. 创建转录任务
-	t.logger.Info("Creating transcription task...")
-	taskID, err := t.createTask(ctx, downloadURL)
-	if err != nil {
-		return "", fmt.Errorf("create task failed: %w", err)
-	}
-
-	// 5. 轮询查询结果
-	t.logger.Info("Waiting for transcription result...",
-		zap.String("task_id", taskID))
-	result, err := t.queryResult(ctx, taskID)
-	if err != nil {
-		return "", fmt.Errorf("query result failed: %w", err)
+	if result != nil && len(result.Segments) > 0 {
+		before := len(result.Segments)
+		result.Segments = MergeTranscriptSegments(result.Segments, 12)
+		t.logger.Info("Merged transcript segments", zap.Int("before", before), zap.Int("after", len(result.Segments)))
 	}
 
 	// 6. 保存 SRT 字幕文件
@@ -554,6 +531,82 @@ func (t *BcutTranscriberTool) queryResult(ctx context.Context, taskID string) (*
 }
 
 // saveSRT 保存 SRT 字幕文件
+
+// transcribeLocalWhisper 本地 faster-whisper 兜底转写（Bcut 被 412 时）。
+
+// transcribeViaBcut 执行完整 Bcut 云端转写流程。
+func (t *BcutTranscriberTool) transcribeViaBcut(ctx context.Context, filePath string) (*TranscriptResult, error) {
+	fileData, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file: %w", err)
+	}
+	t.logger.Info("Requesting upload...")
+	uploadResp, err := t.requestUpload(ctx, fileData)
+	if err != nil {
+		return nil, fmt.Errorf("request upload failed: %w", err)
+	}
+	t.logger.Info("Uploading file parts...",
+		zap.Int("parts", len(uploadResp.Data.UploadURLs)),
+		zap.Int("size_kb", uploadResp.Data.Size/1024))
+	etags, err := t.uploadParts(ctx, fileData, uploadResp)
+	if err != nil {
+		return nil, fmt.Errorf("upload parts failed: %w", err)
+	}
+	t.logger.Info("Committing upload...")
+	downloadURL, err := t.commitUpload(ctx, uploadResp, etags)
+	if err != nil {
+		return nil, fmt.Errorf("commit upload failed: %w", err)
+	}
+	t.logger.Info("Creating transcription task...")
+	taskID, err := t.createTask(ctx, downloadURL)
+	if err != nil {
+		return nil, fmt.Errorf("create task failed: %w", err)
+	}
+	t.logger.Info("Waiting for transcription result...", zap.String("task_id", taskID))
+	result, err := t.queryResult(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("query result failed: %w", err)
+	}
+	return result, nil
+}
+
+func (t *BcutTranscriberTool) transcribeLocalWhisper(ctx context.Context, audioPath string) (*TranscriptResult, error) {
+	if strings.TrimSpace(audioPath) == "" {
+		return nil, fmt.Errorf("empty audio path")
+	}
+	if _, err := os.Stat(audioPath); err != nil {
+		return nil, fmt.Errorf("audio not found: %w", err)
+	}
+	outJSON := filepath.Join(os.TempDir(), fmt.Sprintf("whisper_%d.json", time.Now().UnixNano()))
+	script := "/root/projects/ytb2bili-main/tools/whisper_transcribe.py"
+	py := "/root/projects/gpt-sovits-infer/venv/bin/python"
+	if _, err := os.Stat(script); err != nil {
+		return nil, fmt.Errorf("whisper script missing: %w", err)
+	}
+	cmd := exec.CommandContext(ctx, py, script, audioPath, outJSON)
+	cmd.Env = append(os.Environ(), "HF_ENDPOINT=https://hf-mirror.com", "PYTHONUNBUFFERED=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("local whisper failed: %w: %s", err, string(out[len(out)-min(len(out), 400):]))
+	}
+	defer os.Remove(outJSON)
+	data, err := os.ReadFile(outJSON)
+	if err != nil {
+		return nil, fmt.Errorf("read whisper output: %w", err)
+	}
+	var res TranscriptResult
+	if err := json.Unmarshal(data, &res); err != nil {
+		return nil, fmt.Errorf("parse whisper output: %w", err)
+	}
+	if res.Language == "" {
+		res.Language = "en"
+	}
+	t.logger.Info("Local whisper transcription finished",
+		zap.Int("segments", len(res.Segments)),
+		zap.String("language", res.Language))
+	return &res, nil
+}
+
 func (t *BcutTranscriberTool) saveSRT(audioPath string, result *TranscriptResult) (string, error) {
 	// 生成 SRT 文件路径（与音频文件同目录）
 	srtPath := strings.TrimSuffix(audioPath, ".mp3") + ".srt"
@@ -598,4 +651,51 @@ func (t *BcutTranscriberTool) formatSRTTime(seconds float64) string {
 	millis := int((seconds - float64(int(seconds))) * 1000)
 
 	return fmt.Sprintf("%02d:%02d:%02d,%03d", hours, minutes, secs, millis)
+}
+
+// MergeTranscriptSegments 将碎句合并为句级字幕，降低「半句被下一句切掉」的概率。
+func MergeTranscriptSegments(segments []TranscriptSegment, maxDurSec float64) []TranscriptSegment {
+	if len(segments) == 0 {
+		return segments
+	}
+	if maxDurSec <= 0 {
+		maxDurSec = 12
+	}
+	out := make([]TranscriptSegment, 0, len(segments))
+	var cur *TranscriptSegment
+	flush := func() {
+		if cur != nil && strings.TrimSpace(cur.Text) != "" {
+			out = append(out, *cur)
+		}
+		cur = nil
+	}
+	endPunct := []string{"。", "！", "？", "；", ".", "!", "?", ";"}
+	for _, seg := range segments {
+		text := strings.TrimSpace(seg.Text)
+		if text == "" {
+			continue
+		}
+		if cur == nil {
+			tmp := seg
+			tmp.Text = text
+			cur = &tmp
+		} else {
+			cur.Text = strings.TrimSpace(cur.Text + " " + text)
+			if seg.End > cur.End {
+				cur.End = seg.End
+			}
+		}
+		ended := false
+		for _, p := range endPunct {
+			if strings.HasSuffix(cur.Text, p) {
+				ended = true
+				break
+			}
+		}
+		if ended || (cur.End-cur.Start) >= maxDurSec {
+			flush()
+		}
+	}
+	flush()
+	return out
 }

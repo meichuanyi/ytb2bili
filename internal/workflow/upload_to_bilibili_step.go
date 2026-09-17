@@ -212,8 +212,8 @@ func (s *UploadToBilibiliStep) buildSubmissionInfo(ctx context.Context, userID s
 		if source == "" {
 			source = "https://www.youtube.com"
 		}
-	// } else if vctx.VideoURL != "" {
-	// 	desc += fmt.Sprintf("\n\n原视频链接：%s", vctx.VideoURL)
+		// } else if vctx.VideoURL != "" {
+		// 	desc += fmt.Sprintf("\n\n原视频链接：%s", vctx.VideoURL)
 	}
 
 	const maxDescLength = 2000
@@ -222,7 +222,7 @@ func (s *UploadToBilibiliStep) buildSubmissionInfo(ctx context.Context, userID s
 	}
 
 	studio := &biliaccount.UploadSubmission{
-		AccountID:  vctx.BiliAccountID,
+		AccountID: vctx.BiliAccountID,
 		Copyright: copyright,
 		Source:    source,
 		Title:     s.truncateTitle(title, 80), // B站标题最长80字符

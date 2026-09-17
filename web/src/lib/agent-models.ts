@@ -106,10 +106,8 @@ export const FALLBACK_MODEL_CATALOG: ModelCatalogItem[] = [
 export const MODEL_CATALOG = FALLBACK_MODEL_CATALOG;
 
 export function normalizeTier(tier?: string | null): MembershipTier {
-  if (tier === 'basic' || tier === 'standard' || tier === 'pro' || tier === 'enterprise') {
-    return tier;
-  }
-  return 'free';
+  // Self-hosted: membership gates removed — always enterprise.
+  return 'enterprise';
 }
 
 export function toModelCatalogItem(model: WorkerAiModel): ModelCatalogItem {
@@ -148,15 +146,13 @@ export function mergeModelCatalog(models: ModelCatalogItem[], fallback: ModelCat
 }
 
 export function modelsForTier(models: ModelCatalogItem[], tier?: string | null): ModelCatalogItem[] {
-  const currentTier = normalizeTier(tier);
-  const currentIndex = TIER_ORDER.indexOf(currentTier);
-
-  return models.filter((model) => TIER_ORDER.indexOf(model.minTier) <= currentIndex);
+  // Self-hosted: no tier lock — return every model.
+  return models;
 }
 
 export function lockedModelsForTier(models: ModelCatalogItem[], tier?: string | null): ModelCatalogItem[] {
-  const unlockedIds = new Set(modelsForTier(models, tier).map((model) => model.id));
-  return models.filter((model) => !unlockedIds.has(model.id));
+  // Self-hosted: nothing is locked.
+  return [];
 }
 
 export function nextTier(tier?: string | null): MembershipTier | null {

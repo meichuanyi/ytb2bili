@@ -19,7 +19,7 @@ var Module = fx.Module("server",
 	fx.Invoke(Start), // 启动服务器
 )
 
-func NewEngine(cfg *config.AppConfig) *gin.Engine {
+func NewEngine(cfg *config.AppConfig, logger *zap.Logger) *gin.Engine {
 	if cfg.Debug {
 		gin.SetMode(gin.DebugMode)
 	} else {
@@ -29,6 +29,7 @@ func NewEngine(cfg *config.AppConfig) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(middleware.CORS())
+	r.Use(middleware.AccessLog(logger))
 
 	// 配置静态文件服务 - 用于访问视频、字幕等文件
 	if cfg.Server.StaticDir != "" {

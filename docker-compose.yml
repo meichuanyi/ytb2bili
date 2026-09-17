@@ -49,6 +49,11 @@ services:
       - WORKFLOW_COOKIES_FILE=${WORKFLOW_COOKIES_FILE}
       - WORKFLOW_COOKIES_DIR=${WORKFLOW_COOKIES_DIR:-/tmp/cookies}
       - WORKFLOW_PROXY_URL=${WORKFLOW_PROXY_URL}
+
+      # YouTube OAuth（账号绑定）— 覆盖 config.toml 的 [youtube] 区
+      - YOUTUBE_CLIENT_ID=${YOUTUBE_CLIENT_ID}
+      - YOUTUBE_CLIENT_SECRET=${YOUTUBE_CLIENT_SECRET}
+      - YOUTUBE_REDIRECT_URL=${YOUTUBE_REDIRECT_URL}
       
       # Microsoft Speech & Translator Service
       - SPEECH_KEY=${SPEECH_KEY}

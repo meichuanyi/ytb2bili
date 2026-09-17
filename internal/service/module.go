@@ -7,6 +7,7 @@ import (
 // Module 提供所有服务的依赖注入模块
 var Module = fx.Module("service",
 	fx.Provide(
+		NewNotifier,
 		NewAgentOpenService,
 		NewSystemSettingsClient,
 		NewYouTubeBindingService,

@@ -381,6 +381,14 @@ class ApiService {
     return response.data;
   }
 
+  async addYouTubeSubscription(data: {
+    user_id: string;
+    channel_input: string;
+  }): Promise<{ subscription: TbSubscription }> {
+    const response = await this.client.post<{ subscription: TbSubscription }>('/api/youtube/subscriptions', data);
+    return response.data;
+  }
+
   async getYouTubeFeedVideos(params?: {
     user_id?: string;
     page?: number;

@@ -32,11 +32,14 @@ export interface UseMembershipReturn {
  * Returns safe defaults so existing UI code continues to compile and render
  * without crashing. Links to /membership will 404 until the feature is
  * re-introduced.
+ *
+ * 自托管解锁：会员后端已移除，但部分功能仍按等级锁定（如关闭上传宣传文案）。
+ * 此处返回最高等级 enterprise，避免付费功能被永久锁死。
  */
 export function useMembership(): UseMembershipReturn {
   const defaults = useMemo<UseMembershipReturn>(
     () => ({
-      tier: 'free',
+      tier: 'enterprise',
       credits: { balance: 0 },
       quota: { dailyUsed: 0, dailyUploadLimit: 10 },
       membershipData: { membership: null },

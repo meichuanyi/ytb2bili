@@ -65,6 +65,7 @@ type AppConfig struct {
 	AzureTTS  AzureTTSConfig  `toml:"azure_tts"`
 	TikHub    TikHubConfig    `toml:"tikhub"`
 	Feishu    FeishuConfig    `toml:"feishu"`
+	Youtube   YoutubeConfig   `toml:"youtube"` // YouTube OAuth 授权配置
 	APIAuth   AppAuthConfig   `toml:"api_auth"`
 	Analytics AnalyticsConfig `toml:"analytics"`
 	Updater   UpdaterConfig   `toml:"updater"`
@@ -73,18 +74,43 @@ type AppConfig struct {
 
 	Workflow     WorkflowConfig     `toml:"workflow"`
 	AgentOpenAPI AgentOpenAPIConfig `toml:"agent_open_api"`
+	Notify       NotifyConfig       `toml:"notify"`
+}
+
+// NotifyConfig 出站通知（webhook / ntfy / Bark / Telegram / 钉钉 / 飞书 / 企微）。
+type NotifyConfig struct {
+	Enabled bool `toml:"enabled"`
+	// WebhookURL 通用 JSON POST，body 见 NotifyPayload。
+	WebhookURL string `toml:"webhook_url"`
+	// NtfyURL 形如 http://ntfy.sh/topic 或自建 http://host/topic
+	NtfyURL string `toml:"ntfy_url"`
+	// BarkURL 形如 https://api.day.app/<key>/<title>/<body> 或 https://api.day.app/<key>
+	BarkURL string `toml:"bark_url"`
+	// TelegramBotToken + TelegramChatID
+	TelegramBotToken string `toml:"telegram_bot_token"`
+	TelegramChatID   string `toml:"telegram_chat_id"`
+	// MagicPushURL 形如 http://192.168.6.108:818/api/push/<TOKEN>
+	MagicPushURL string `toml:"magicpush_url"`
+	// 钉钉/飞书/企微自定义机器人 webhook
+	DingTalkWebhook  string `toml:"dingtalk_webhook"`
+	FeishuBotWebhook string `toml:"feishu_bot_webhook"`
+	WeComWebhook     string `toml:"wecom_webhook"`
+	// Events 过滤，空=全部；可选 video.completed / video.failed / bilibili.uploaded
+	Events []string `toml:"events,omitempty"`
+	// TimeoutSec 默认 10
+	TimeoutSec int `toml:"timeout_sec"`
 }
 
 // LLMConfig holds the user-configurable LLM provider settings.
 type LLMConfig struct {
-	Provider    string  `toml:"provider"`    // openai, deepseek, anthropic, ollama, qwen, custom
-	BaseURL     string  `toml:"base_url"`    // OpenAI-compatible API endpoint
-	APIKey      string  `toml:"api_key"`     // User's API key
-	Model       string  `toml:"model"`       // Default model name (optional; falls back to Models[0])
+	Provider    string   `toml:"provider"`         // openai, deepseek, anthropic, ollama, qwen, custom
+	BaseURL     string   `toml:"base_url"`         // OpenAI-compatible API endpoint
+	APIKey      string   `toml:"api_key"`          // User's API key
+	Model       string   `toml:"model"`            // Default model name (optional; falls back to Models[0])
 	Models      []string `toml:"models,omitempty"` // Selectable model list for frontend
-	Temperature float64 `toml:"temperature"` // Default temperature (0.0-2.0)
-	MaxTokens   int     `toml:"max_tokens"`  // Default max tokens per request
-	Timeout     int     `toml:"timeout"`     // Timeout in seconds (default 120)
+	Temperature float64  `toml:"temperature"`      // Default temperature (0.0-2.0)
+	MaxTokens   int      `toml:"max_tokens"`       // Default max tokens per request
+	Timeout     int      `toml:"timeout"`          // Timeout in seconds (default 120)
 }
 
 // DeepseekConfig Deepseek LLM 配置
@@ -126,6 +152,16 @@ type FeishuConfig struct {
 	AppSecret         string `toml:"app_secret"`
 	VerificationToken string `toml:"verification_token"`
 	EncryptKey        string `toml:"encrypt_key"`
+}
+
+// YoutubeConfig YouTube OAuth 授权配置。
+// client_id/client_secret 在 Google Cloud Console 创建 OAuth 2.0 客户端后获得；
+// redirect_url 必须与 Console 中配置的重定向 URI 完全一致（Web 应用类型填后端回调）。
+// 三项凭据均非空即视为启用（对应 YouTubeClientFactory.IsConfigured）。
+type YoutubeConfig struct {
+	ClientID     string `toml:"client_id"`     // Google OAuth2 客户端 ID
+	ClientSecret string `toml:"client_secret"` // Google OAuth2 客户端密钥
+	RedirectURL  string `toml:"redirect_url"`  // OAuth 回调地址（需与 Google Console 一致）
 }
 
 type ServerConfig struct {
@@ -454,9 +490,25 @@ func LoadAppConfig() (*AppConfig, error) {
 		return nil, err
 	}
 
+	// 允许通过环境变量覆盖 YouTube OAuth 凭据（优先于 config.toml）。
+	// 与 docker-compose 中 YOUTUBE_CLIENT_ID 等变量对应。
+	applyEnvOverlay(&cfg.Youtube.ClientID, "YOUTUBE_CLIENT_ID")
+	applyEnvOverlay(&cfg.Youtube.ClientSecret, "YOUTUBE_CLIENT_SECRET")
+	applyEnvOverlay(&cfg.Youtube.RedirectURL, "YOUTUBE_REDIRECT_URL")
+
+	// 允许通过环境变量覆盖工作流代理（与 docker-compose 中 WORKFLOW_PROXY_URL 对应）。
+	applyEnvOverlay(&cfg.Workflow.ProxyURL, "WORKFLOW_PROXY_URL")
+
 	propagateLLMToAgent(cfg)
 
 	return cfg, nil
+}
+
+// applyEnvOverlay 若环境变量非空则覆盖目标字段。
+func applyEnvOverlay(target *string, envKey string) {
+	if value := strings.TrimSpace(os.Getenv(envKey)); value != "" {
+		*target = value
+	}
 }
 
 func validateAuthConfig(cfg *AppConfig) error {

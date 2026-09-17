@@ -35,12 +35,11 @@ import { VoicePicker } from '@/components/tts/VoicePicker';
 import CookiesManager from '@/components/CookiesManager';
 import UpdateManager from '@/components/UpdateManager';
 import {
+  Bell,
   LogOut,
   KeyRound,
   ChevronDown,
   Check,
-  Crown,
-  User,
   Languages,
   AudioLines,
   SlidersHorizontal,
@@ -53,7 +52,7 @@ import { resolveClientLocale, translateClientText } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/contexts/I18nContext';
 
-type SettingsSectionId = 'profile' | 'translation' | 'tts' | 'apiKeys' | 'system' | 'publishing' | 'template';
+type SettingsSectionId = 'translation' | 'tts' | 'apiKeys' | 'system' | 'notify' | 'publishing' | 'template';
 
 const SettingsCard = ({ children, className }: { children: React.ReactNode; className?: string }) => (
   <div className={cn('overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.045)]', className)}>{children}</div>
@@ -369,6 +368,11 @@ const BID_TEMPLATE_STYLE_STORAGE_KEY = 'ytb2bili:settings:bid-template-style';
 const SYSTEM_SETTING_KEY_YOUTUBE_FEED_SYNC_ENABLED = 'youtube_feed_sync_enabled';
 const SYSTEM_SETTING_KEY_YOUTUBE_FEED_SYNC_INTERVAL = 'youtube_feed_sync_interval_minutes';
 const SYSTEM_SETTING_KEY_YOUTUBE_FEED_SYNC_LOOKBACK = 'youtube_feed_sync_lookback_days';
+const SYSTEM_SETTING_KEY_NOTIFY_ENABLED = 'notify_enabled';
+const SYSTEM_SETTING_KEY_NOTIFY_WEBHOOK_URL = 'notify_webhook_url';
+const SYSTEM_SETTING_KEY_NOTIFY_MAGICPUSH_URL = 'notify_magicpush_url';
+const SYSTEM_SETTING_KEY_NOTIFY_NTFY_URL = 'notify_ntfy_url';
+const SYSTEM_SETTING_KEY_NOTIFY_BARK_URL = 'notify_bark_url';
 
 const LANGUAGE_OPTIONS = [
   { value: 'auto', label: '自动检测' },
@@ -515,6 +519,12 @@ export default function SettingsPage() {
   const [youtubeFeedSyncEnabled, setYouTubeFeedSyncEnabled] = useState(true);
   const [youtubeFeedSyncInterval, setYouTubeFeedSyncInterval] = useState('60');
   const [youtubeFeedSyncLookback, setYouTubeFeedSyncLookback] = useState('7');
+  const [notifyEnabled, setNotifyEnabled] = useState(false);
+  const [notifyWebhookURL, setNotifyWebhookURL] = useState('');
+  const [notifyMagicPushURL, setNotifyMagicPushURL] = useState('');
+  const [notifyNtfyURL, setNotifyNtfyURL] = useState('');
+  const [notifyBarkURL, setNotifyBarkURL] = useState('');
+  const [notifyTesting, setNotifyTesting] = useState(false);
   const [systemSettingsLoading, setSystemSettingsLoading] = useState(false);
   const [systemSettingsLoaded, setSystemSettingsLoaded] = useState(false);
   const [systemSettingsError, setSystemSettingsError] = useState('');
@@ -530,7 +540,7 @@ export default function SettingsPage() {
   const [bilibiliZones, setBilibiliZones] = useState<BilibiliVideoZone[]>([]);
   const [bilibiliZonesLoading, setBilibiliZonesLoading] = useState(false);
   const [bilibiliZonesError, setBilibiliZonesError] = useState('');
-  const [watermarkPromoEnabled, setWatermarkPromoEnabled] = useState(true);
+  const [watermarkPromoEnabled, setWatermarkPromoEnabled] = useState(false);
   const [submissionCopyright, setSubmissionCopyright] = useState('2');
   const [submissionParentTid, setSubmissionParentTid] = useState('');
   const [submissionChildTid, setSubmissionChildTid] = useState('');
@@ -542,9 +552,8 @@ export default function SettingsPage() {
   const [creatingApiKey, setCreatingApiKey] = useState(false);
   const [deletingApiKeyId, setDeletingApiKeyId] = useState('');
   const [latestCreatedApiKey, setLatestCreatedApiKey] = useState<UserApiKeyRecord | null>(null);
-  const [activeSection, setActiveSection] = useState<SettingsSectionId | null>('profile');
+  const [activeSection, setActiveSection] = useState<SettingsSectionId | null>('translation');
   const normalizedTier = normalizeTier(tier);
-  const isPaidMember = normalizedTier !== 'free';
   const isProMember = normalizedTier === 'pro' || normalizedTier === 'enterprise';
   const selectableModels = React.useMemo(
     () => modelCatalog.filter((item) => typeof item.id === 'string' && item.id.trim().length > 0),
@@ -572,11 +581,11 @@ export default function SettingsPage() {
   const selectedSubmissionChildLabel = selectedSubmissionChild?.name ?? t('将使用一级分区默认投稿');
   const apiKeysReady = apiKeysLoaded || apiKeysLoading;
   const sectionItems: Array<{ id: SettingsSectionId; label: string; icon: React.ElementType }> = [
-    { id: 'profile', label: '支持开发者（微信:tradingba）', icon: User },
     { id: 'translation', label: '翻译设置', icon: Languages },
     { id: 'tts', label: '语音合成', icon: AudioLines },
     { id: 'apiKeys', label: 'API 密钥管理', icon: KeyRound },
     { id: 'system', label: '系统设置', icon: SlidersHorizontal },
+    { id: 'notify', label: '通知', icon: Bell },
     { id: 'publishing', label: '上传设置', icon: UploadCloud },
     { id: 'template', label: '模板偏好', icon: LayoutTemplate },
   ];
@@ -651,6 +660,11 @@ export default function SettingsPage() {
     setYouTubeFeedSyncEnabled(true);
     setYouTubeFeedSyncInterval('60');
     setYouTubeFeedSyncLookback('7');
+    setNotifyEnabled(false);
+    setNotifyWebhookURL('');
+    setNotifyMagicPushURL('');
+    setNotifyNtfyURL('');
+    setNotifyBarkURL('');
     setSystemSettingsError('');
     setSystemSettingsLoaded(false);
     setSystemSettingsLoading(false);
@@ -679,6 +693,11 @@ export default function SettingsPage() {
     setYouTubeFeedSyncEnabled(nextEnabled);
     setYouTubeFeedSyncInterval(nextInterval);
     setYouTubeFeedSyncLookback(nextLookback);
+    setNotifyEnabled(systemSettings[SYSTEM_SETTING_KEY_NOTIFY_ENABLED] === '1');
+    setNotifyWebhookURL(systemSettings[SYSTEM_SETTING_KEY_NOTIFY_WEBHOOK_URL] ?? '');
+    setNotifyMagicPushURL(systemSettings[SYSTEM_SETTING_KEY_NOTIFY_MAGICPUSH_URL] ?? '');
+    setNotifyNtfyURL(systemSettings[SYSTEM_SETTING_KEY_NOTIFY_NTFY_URL] ?? '');
+    setNotifyBarkURL(systemSettings[SYSTEM_SETTING_KEY_NOTIFY_BARK_URL] ?? '');
     setSystemSettingsLoaded(true);
     })
     .catch((error) => {
@@ -730,7 +749,7 @@ export default function SettingsPage() {
       setBidDefaultLanguage('zh-Hans');
       setBidDefaultTone('professional');
       setBidTemplateStyle('standard');
-      setWatermarkPromoEnabled(true);
+      setWatermarkPromoEnabled(false);
       setSubmissionCopyright('2');
       return;
     }
@@ -801,7 +820,7 @@ export default function SettingsPage() {
       : isBilibiliSubmissionCopyrightOption(storedSubmissionCopyright ?? '')
         ? String(storedSubmissionCopyright)
         : '2';
-    const nextWatermarkPromoEnabled = watermarkPromoSetting !== '0';
+    const nextWatermarkPromoEnabled = watermarkPromoSetting === '1';
 
     setAutoUpload(nextAutoUpload);
     setAutoUploadInterval(nextAutoUploadInterval);
@@ -876,6 +895,44 @@ export default function SettingsPage() {
     setSystemSettingsError(error instanceof Error ? error.message : translateClientText('保存 YouTube feed 同步开关失败'));
     toast.error(translateClientText('保存 YouTube feed 同步开关失败'));
   });
+  }, []);
+
+  const handleNotifyEnabledChange = useCallback((nextValue: boolean) => {
+    setNotifyEnabled(nextValue);
+    void systemSettingsApi.updateSettings({
+      [SYSTEM_SETTING_KEY_NOTIFY_ENABLED]: nextValue ? '1' : '0',
+    }).catch(() => {
+      toast.error(translateClientText('保存通知开关失败'));
+    });
+  }, []);
+
+  const persistNotifyField = useCallback((key: string, value: string) => {
+    void systemSettingsApi.updateSettings({ [key]: value }).catch(() => {
+      toast.error(translateClientText('保存通知配置失败'));
+    });
+  }, []);
+
+  const handleNotifyTest = useCallback(async () => {
+    setNotifyTesting(true);
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const res = await fetch('/api/v1/system/settings/notify/test', {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((payload as { message?: string }).message || `HTTP ${res.status}`);
+      }
+      toast.success(translateClientText('测试通知已发送'));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : translateClientText('测试通知失败'));
+    } finally {
+      setNotifyTesting(false);
+    }
   }, []);
 
   const handleYouTubeFeedSyncIntervalChange = useCallback((nextValue: string) => {
@@ -1005,15 +1062,11 @@ export default function SettingsPage() {
   }, [updateSettings, userId]);
 
   const handleWatermarkPromoEnabledChange = useCallback((nextValue: boolean) => {
-    if (!isProMember && !nextValue) {
-      toast.error(translateClientText('仅 Pro 会员可关闭上传宣传文案'));
-      return;
-    }
     setWatermarkPromoEnabled(nextValue);
     void updateSettings({ [USER_SETTING_KEY_WATERMARK_PROMO_ENABLED]: nextValue ? '1' : '0' }).catch(() => {
       toast.error(translateClientText('保存宣传文案开关失败'));
     });
-  }, [isProMember, updateSettings]);
+  }, [updateSettings]);
 
   const handleCreateApiKey = useCallback(async () => {
     const trimmedName = newApiKeyName.trim();
@@ -1101,51 +1154,6 @@ export default function SettingsPage() {
                     active={activeSection === item.id}
                     onClick={() => toggleSection(item.id)}
                   />
-
-                  {activeSection === item.id && item.id === 'profile' && (
-                    <div className="border-t border-slate-200">
-                      <SettingsCardContent>
-                        <div className="rounded-[28px] border border-amber-100 bg-[linear-gradient(180deg,rgba(255,251,235,0.95),rgba(255,255,255,1))] p-4 sm:p-5">
-                          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                            <div className="max-w-3xl space-y-2">
-                              <p className="text-[17px] font-semibold leading-7 text-slate-950 sm:text-[18px]">{t('每一次更新、每一次修复，背后都是看不见的成本。')}</p>
-                              <p className="text-sm leading-6 text-slate-500">
-                                {t('当它在默默为你节省时间、提高产出时，成为付费用户，就是对开发者最好的鼓励。你支持的不只是一款工具，更是它持续进化、不断变好的未来。')}
-                              </p>
-                              <div className="flex flex-wrap gap-2 pt-0.5 text-xs font-medium text-slate-600">
-                                <span className="rounded-full bg-white px-3 py-1 shadow-sm shadow-slate-200/70 ring-1 ring-slate-200">{t('支持持续迭代')}</span>
-                                <span className="rounded-full bg-white px-3 py-1 shadow-sm shadow-slate-200/70 ring-1 ring-slate-200">{t('解锁更完整能力')}</span>
-                                <span className="rounded-full bg-white px-3 py-1 shadow-sm shadow-slate-200/70 ring-1 ring-slate-200">{t('帮助开发者长期维护')}</span>
-                              </div>
-                            </div>
-                          <div className="flex shrink-0 flex-col gap-2 lg:min-w-[240px] lg:items-end">
-                            <Link
-                              href="/membership"
-                              className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-5 text-sm font-semibold text-amber-800 transition hover:border-amber-300 hover:bg-amber-100/80"
-                            >
-                              <Crown className="h-4 w-4 text-amber-500" />
-                              <span>{isPaidMember ? t('继续支持开发者') : t('赞助开发者并升级')}</span>
-                            </Link>
-                          </div>
-                        </div>
-                        </div>
-                        <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
-                          <button
-                            type="button"
-                            className="rounded-2xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-                          >
-                            {t('继续使用当前方案')}
-                          </button>
-                          <Link
-                            href="/membership"
-                            className="inline-flex items-center justify-center rounded-2xl bg-amber-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-amber-500/20 transition hover:bg-amber-600"
-                          >
-                            {t('立即赞助开发者')}
-                          </Link>
-                        </div>
-                      </SettingsCardContent>
-                    </div>
-                  )}
 
                   {activeSection === item.id && item.id === 'translation' && (
                     <div className="border-t border-slate-200">
@@ -1606,6 +1614,100 @@ export default function SettingsPage() {
                     </div>
                   )}
 
+                  {activeSection === item.id && item.id === 'notify' && (
+                    <div className="border-t border-slate-200">
+                      <SettingsCardContent>
+                        <SectionHint text={t('任务完成/失败时推送通知；可配通用 Webhook 或魔法推送 MagicPush。')} />
+                        <SurfaceCard
+                          title={t('推送开关')}
+                          description={t('开启后才会向下方已配置的渠道发送通知。')}
+                          tone="accent"
+                        >
+                          <SettingsRow
+                            title={t('启用通知')}
+                            description={t('关闭后不发送任何出站通知。')}
+                          >
+                            <Switch
+                              checked={notifyEnabled}
+                              disabled={systemSettingsLoading && !systemSettingsLoaded}
+                              onChange={handleNotifyEnabledChange}
+                            />
+                          </SettingsRow>
+                        </SurfaceCard>
+
+                        <SurfaceCard
+                          title={t('魔法推送 MagicPush')}
+                          description={t('填写接口地址，通常为 http://主机:818/api/push/<TOKEN>')}
+                        >
+                          <SettingsRow title={t('MagicPush 接口')} description={t('支持本机 127.0.0.1:818')}>
+                            <Input
+                              value={notifyMagicPushURL}
+                              placeholder="http://127.0.0.1:818/api/push/TOKEN"
+                              disabled={systemSettingsLoading && !systemSettingsLoaded}
+                              onChange={(e) => setNotifyMagicPushURL(e.target.value)}
+                              onBlur={() => persistNotifyField(SYSTEM_SETTING_KEY_NOTIFY_MAGICPUSH_URL, notifyMagicPushURL)}
+                              className="w-full max-w-md"
+                            />
+                          </SettingsRow>
+                        </SurfaceCard>
+
+                        <SurfaceCard
+                          title={t('通用 Webhook')}
+                          description={t('POST JSON：event/title/message/video_id/status')}
+                        >
+                          <SettingsRow title={t('Webhook URL')} description={t('任意可接收 JSON 的地址')}>
+                            <Input
+                              value={notifyWebhookURL}
+                              placeholder="https://example.com/hooks/ytb2bili"
+                              disabled={systemSettingsLoading && !systemSettingsLoaded}
+                              onChange={(e) => setNotifyWebhookURL(e.target.value)}
+                              onBlur={() => persistNotifyField(SYSTEM_SETTING_KEY_NOTIFY_WEBHOOK_URL, notifyWebhookURL)}
+                              className="w-full max-w-md"
+                            />
+                          </SettingsRow>
+                        </SurfaceCard>
+
+                        <SurfaceCard
+                          title={t('其他渠道（可选）')}
+                          description={t('ntfy / Bark')}
+                        >
+                          <div className="space-y-3">
+                            <SettingsRow title={t('ntfy URL')} description={t('例如 http://ntfy.example.com/topic')}>
+                              <Input
+                                value={notifyNtfyURL}
+                                placeholder="http://127.0.0.1:8090/ytb2bili"
+                                disabled={systemSettingsLoading && !systemSettingsLoaded}
+                                onChange={(e) => setNotifyNtfyURL(e.target.value)}
+                                onBlur={() => persistNotifyField(SYSTEM_SETTING_KEY_NOTIFY_NTFY_URL, notifyNtfyURL)}
+                                className="w-full max-w-md"
+                              />
+                            </SettingsRow>
+                            <SettingsRow title={t('Bark URL')} description={t('例如 https://api.day.app/KEY')}>
+                              <Input
+                                value={notifyBarkURL}
+                                placeholder="https://api.day.app/KEY"
+                                disabled={systemSettingsLoading && !systemSettingsLoaded}
+                                onChange={(e) => setNotifyBarkURL(e.target.value)}
+                                onBlur={() => persistNotifyField(SYSTEM_SETTING_KEY_NOTIFY_BARK_URL, notifyBarkURL)}
+                                className="w-full max-w-md"
+                              />
+                            </SettingsRow>
+                          </div>
+                        </SurfaceCard>
+
+                        <div className="flex items-center gap-3 pt-2">
+                          <Button
+                            variant="outline"
+                            disabled={!notifyEnabled || notifyTesting}
+                            onClick={() => { void handleNotifyTest(); }}
+                          >
+                            {notifyTesting ? t('发送中...') : t('发送测试通知')}
+                          </Button>
+                        </div>
+                      </SettingsCardContent>
+                    </div>
+                  )}
+
                   {activeSection === item.id && item.id === 'publishing' && (
                     <div className="border-t border-slate-200">
                       <SettingsCardContent>
@@ -1619,11 +1721,11 @@ export default function SettingsPage() {
                           <div className="space-y-3">
                             <SettingsRow
                               title={t('携带上传宣传文案')}
-                              description={isProMember ? t('关闭后，上传简介将不再自动追加 ytb2bili 宣传文案。') : t('默认会附带 ytb2bili 宣传文案，升级 Pro 后可关闭。')}
+                              description={t('关闭后，上传简介将不再自动追加 ytb2bili 宣传文案。')}
                             >
                               <Switch
                                 checked={watermarkPromoEnabled}
-                                disabled={(settingsLoading && !settingsLoaded) || !isProMember}
+                                disabled={settingsLoading && !settingsLoaded}
                                 onChange={handleWatermarkPromoEnabledChange}
                               />
                             </SettingsRow>

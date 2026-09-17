@@ -501,7 +501,12 @@ func (c *TTSClient) resolveAutoProfile(config TTSConfig, locale, requestedVoice,
 		}
 	}
 
-	return ttsProfile{}, fmt.Errorf("no available TTS provider; configure [azure_tts] or [tencent_tts] in config.toml with valid credentials")
+	// Fallback: free Edge-TTS (no API key required)
+	if profile, err := c.resolveVoiceForProvider("edge", locale, requestedVoice, search); err == nil {
+		return profile, nil
+	}
+
+	return ttsProfile{}, fmt.Errorf("no available TTS provider; configure [azure_tts] or [tencent_tts], or use provider=edge")
 }
 
 // resolveVoiceForProvider resolves a voice for the given provider using the embedded catalog.

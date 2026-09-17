@@ -2,13 +2,11 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/difyz9/ytb2bili/internal/config"
 	"github.com/difyz9/ytb2bili/internal/service"
 	agent "github.com/difyz9/ytb2bili/pkg/agent"
@@ -16,6 +14,7 @@ import (
 	"github.com/difyz9/ytb2bili/pkg/store/model"
 	storemodel "github.com/difyz9/ytb2bili/pkg/store/model"
 	"github.com/difyz9/ytb2bili/pkg/tools"
+	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -37,11 +36,11 @@ type AgentModelOption struct {
 }
 
 var agentModelMetadata = map[string]AgentModelOption{
-	"gpt-4o-mini":      {ID: "gpt-4o-mini", Label: "GPT-4o Mini", Description: "适合日常问答和轻量任务", MinTier: string(model.TierFree)},
-	"gpt-4o":           {ID: "gpt-4o", Label: "GPT-4o", Description: "更强的综合能力，适合高质量内容生成", MinTier: string(model.TierPro)},
-	"deepseek-chat":    {ID: "deepseek-chat", Label: "DeepSeek Chat", Description: "推理性更强，适合复杂指令", MinTier: string(model.TierBasic)},
+	"gpt-4o-mini":       {ID: "gpt-4o-mini", Label: "GPT-4o Mini", Description: "适合日常问答和轻量任务", MinTier: string(model.TierFree)},
+	"gpt-4o":            {ID: "gpt-4o", Label: "GPT-4o", Description: "更强的综合能力，适合高质量内容生成", MinTier: string(model.TierPro)},
+	"deepseek-chat":     {ID: "deepseek-chat", Label: "DeepSeek Chat", Description: "推理性更强，适合复杂指令", MinTier: string(model.TierBasic)},
 	"deepseek-reasoner": {ID: "deepseek-reasoner", Label: "DeepSeek Reasoner", Description: "更强推理能力，适合复杂分析", MinTier: string(model.TierPro)},
-	"gemini-2.0-flash": {ID: "gemini-2.0-flash", Label: "Gemini 2.0 Flash", Description: "更快的多轮对话和长文本处理", MinTier: string(model.TierEnterprise)},
+	"gemini-2.0-flash":  {ID: "gemini-2.0-flash", Label: "Gemini 2.0 Flash", Description: "更快的多轮对话和长文本处理", MinTier: string(model.TierEnterprise)},
 }
 
 // NewAgentHandler creates a new AgentHandler.
@@ -218,42 +217,14 @@ func (h *AgentHandler) getUserIdentity(c *gin.Context) (string, string) {
 }
 
 func (h *AgentHandler) resolveTier(userID, role string) model.Tier {
-	if role == "admin" {
-		return model.TierEnterprise
-	}
-	if userID == "" || h.db == nil {
-		return model.TierFree
-	}
-
-	var membership model.UserMembership
-	if err := h.db.Where("user_id = ?", userID).First(&membership).Error; err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			h.logger.Warn("query membership for agent access failed", zap.String("user_id", userID), zap.Error(err))
-		}
-		return model.TierFree
-	}
-
-	if membership.ExpiresAt.After(time.Now()) {
-		return membership.Tier
-	}
-
-	return model.TierFree
+	// Self-hosted: membership gates removed — everyone gets full access.
+	return model.TierEnterprise
 }
 
 func (h *AgentHandler) allowedModels(ctx context.Context, userID, role string, tier model.Tier) []AgentModelOption {
+	// Self-hosted: tier filter removed — all catalog models are available.
 	baseCatalog := h.providerModelCatalog()
-
-	if role == "admin" {
-		return h.mergeDynamicModels(ctx, userID, append([]AgentModelOption(nil), baseCatalog...))
-	}
-
-	allowed := make([]AgentModelOption, 0, len(baseCatalog))
-	for _, option := range baseCatalog {
-		if h.tierAtLeast(tier, model.Tier(option.MinTier)) {
-			allowed = append(allowed, option)
-		}
-	}
-	return h.mergeDynamicModels(ctx, userID, allowed)
+	return h.mergeDynamicModels(ctx, userID, append([]AgentModelOption(nil), baseCatalog...))
 }
 
 func (h *AgentHandler) canUseModel(ctx context.Context, userID, modelID, role string, tier model.Tier) bool {

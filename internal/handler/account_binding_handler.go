@@ -3,9 +3,12 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,14 +30,19 @@ import (
 // Go默认Transport会读取 HTTPS_PROXY 环境变量；B站API应直连，避免因本地代理未启动而报错。
 func newBilibiliClient() *bilibili.Client {
 	return bilibili.NewClient(
-		bilibili.WithHTTPClient(&http.Client{
-			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
-				// 显式置空 Proxy 函数，强制直连，不读取 HTTP_PROXY / HTTPS_PROXY 环境变量
-				Proxy: func(*http.Request) (*url.URL, error) { return nil, nil },
-			},
-		}),
+		bilibili.WithHTTPClient(newDirectBiliHTTPClient()),
 	)
+}
+
+// newDirectBiliHTTPClient 创建直连 B 站 API 的 HTTP 客户端（不读取系统代理）
+func newDirectBiliHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			// 显式置空 Proxy 函数，强制直连，不读取 HTTP_PROXY / HTTPS_PROXY 环境变量
+			Proxy: func(*http.Request) (*url.URL, error) { return nil, nil },
+		},
+	}
 }
 
 // AccountBindingHandler 账号绑定处理器
@@ -47,6 +55,7 @@ type AccountBindingHandler struct {
 	youtubeClient      *internalservice.YouTubeClientFactory
 	youtubeBinding     *internalservice.YouTubeBindingService
 	bindingService     *internalservice.BindingService
+	biliHTTPClient     *http.Client // 直连 B 站 API 用，用于单次轮询二维码状态
 }
 
 // NewAccountBindingHandler 创建账号绑定处理器
@@ -72,6 +81,7 @@ func NewAccountBindingHandler(
 		youtubeClient:      youtubeClient,
 		youtubeBinding:     youtubeBinding,
 		bindingService:     bindingService,
+		biliHTTPClient:     newDirectBiliHTTPClient(),
 	}
 }
 // RegisterRoutes 注册路由
@@ -271,6 +281,15 @@ func (h *AccountBindingHandler) PollBindingStatus(c *gin.Context) {
 		if authCode, ok := bindingData["auth_code"].(string); ok && authCode != "" {
 			loginData, err := h.pollBilibiliQRCode(authCode)
 			if err != nil {
+				// 二维码已失效/已过期：返回 expired 并清理缓存，让前端立刻提示用户刷新二维码
+				var pollErr *bilibiliPollError
+				if errors.As(err, &pollErr) && pollErr.Code == biliQRCodePollExpired {
+					h.bindingCache.Delete(req.QRCodeKey)
+					h.logger.Info("B站二维码已失效", zap.String("qr_code_key", req.QRCodeKey))
+					Success(c, PollBindingStatusResponse{Status: "expired", Platform: platform})
+					return
+				}
+				// 尚未扫码（86039）或其它临时错误：继续等待
 				h.logger.Debug("B站二维码未扫描", zap.Error(err))
 				Success(c, PollBindingStatusResponse{Status: "pending", Platform: platform})
 				return
@@ -324,14 +343,89 @@ func (h *AccountBindingHandler) PollBindingStatus(c *gin.Context) {
 	})
 }
 
-// pollBilibiliQRCode 轮询B站二维码状态
-func (h *AccountBindingHandler) pollBilibiliQRCode(authCode string) (*bilibili.LoginInfo, error) {
-	client := newBilibiliClient()
-	loginInfo, err := client.PollQRCode(authCode)
+// bilibiliQRCodes bilibili tv 二维码 poll 返回的错误码
+const (
+	biliQRCodePollExpired   = 86038 // 二维码已失效/已过期
+	biliQRCodePollNotScaned = 86039 // 尚未扫码/未确认
+)
+
+// bilibiliPollError 用于将 B 站二维码 poll 的错误码透传给上层，避免死循环阻塞
+type bilibiliPollError struct {
+	Code int // B站返回的错误码
+}
+
+func (e *bilibiliPollError) Error() string {
+	return fmt.Sprintf("bilibili poll failed: code=%d", e.Code)
+}
+
+// pollBilibiliQRCodeOnce 单次轮询B站二维码登录状态（非阻塞）。
+// 相比 SDK 的 PollQRCode（内部死循环等待扫码），此方法只向 B 站请求一次：
+//   - code=0       返回 LoginInfo（扫码成功）
+//   - code=86039   尚未扫码，返回 pending 语义（bilibiliPollError{86039}）
+//   - code=86038   二维码已失效/已过期，返回 expired 语义（bilibiliPollError{86038}）
+//   - 其他错误码   原样返回错误
+//
+// 由上层 handler 通过错误码区分 pending / expired，保证前端能及时感知二维码过期，
+// 而不是一直卡在 pending 直到本地缓存过期。
+func (h *AccountBindingHandler) pollBilibiliQRCodeOnce(authCode string) (*bilibili.LoginInfo, error) {
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+
+	params := url.Values{}
+	params.Set("appkey", bilibili.BiliTVAppKey)
+	params.Set("auth_code", authCode)
+	params.Set("local_id", "0")
+	params.Set("ts", timestamp)
+
+	paramStr := params.Encode()
+	sign := bilibili.Sign(paramStr, bilibili.BiliTVAppSec)
+	params.Set("sign", sign)
+
+	req, err := http.NewRequest("POST", "https://passport.bilibili.com/x/passport-tv-login/qrcode/poll",
+		strings.NewReader(params.Encode()))
 	if err != nil {
 		return nil, err
 	}
-	return loginInfo, nil
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := h.biliHTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Code    int             `json:"code"`
+		Message string          `json:"message"`
+		Data    json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+
+	switch result.Code {
+	case 0:
+		var loginInfo bilibili.LoginInfo
+		if err := json.Unmarshal(result.Data, &loginInfo); err != nil {
+			return nil, err
+		}
+		loginInfo.Platform = "BiliTV"
+		return &loginInfo, nil
+	case biliQRCodePollNotScaned, biliQRCodePollExpired:
+		// 让上层能区分"还没扫"与"二维码已过期"
+		return nil, &bilibiliPollError{Code: result.Code}
+	default:
+		return nil, fmt.Errorf("bilibili poll failed: code=%d, message=%s", result.Code, result.Message)
+	}
+}
+
+// pollBilibiliQRCode 轮询B站二维码状态（保持原有调用签名，内部改为单次轮询）
+func (h *AccountBindingHandler) pollBilibiliQRCode(authCode string) (*bilibili.LoginInfo, error) {
+	return h.pollBilibiliQRCodeOnce(authCode)
 }
 
 // saveBilibiliBinding 保存B站绑定
@@ -859,9 +953,9 @@ func (h *AccountBindingHandler) YouTubeAuthorize(c *gin.Context) {
 		return
 	}
 
-	if h.youtubeClient == nil || h.youtubeClient.OAuthConfig() == nil {
-		h.logger.Error("YouTube client未初始化")
-		InternalServerError(c, "YouTube OAuth未配置")
+	if h.youtubeClient == nil || !h.youtubeClient.IsConfigured() {
+		h.logger.Error("YouTube OAuth 未配置", zap.Bool("client_nil", h.youtubeClient == nil))
+		InternalServerError(c, "YouTube OAuth未配置，请在配置文件的 [youtube] 区设置 client_id/client_secret/redirect_url")
 		return
 	}
 
@@ -948,8 +1042,8 @@ func (h *AccountBindingHandler) YouTubeOAuthCallback(c *gin.Context) {
 	userID := fmt.Sprintf("%v", bindingData["user_id"])
 
 	// 使用YouTubeHandler的OAuth配置交换token
-	if h.youtubeClient == nil || h.youtubeClient.OAuthConfig() == nil {
-		h.logger.Error("YouTube client未初始化")
+	if h.youtubeClient == nil || !h.youtubeClient.IsConfigured() {
+		h.logger.Error("YouTube OAuth 未配置", zap.Bool("client_nil", h.youtubeClient == nil))
 		c.Redirect(302, frontendURL(c, "/dashboard/accounts/youtube-callback?error=oauth_not_configured"))
 		return
 	}

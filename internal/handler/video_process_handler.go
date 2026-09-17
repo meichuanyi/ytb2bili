@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/difyz9/ytb2bili/internal/config"
 	"github.com/difyz9/ytb2bili/internal/service"
 	"github.com/difyz9/ytb2bili/internal/workflow"
 	"github.com/difyz9/ytb2bili/pkg/utils"
+	"github.com/gin-gonic/gin"
 
 	"github.com/difyz9/ytb2bili/pkg/store/model"
 	"github.com/difyz9/ytb2bili/pkg/tools"
@@ -29,6 +29,7 @@ import (
 // VideoProcessHandler 视频处理处理器
 // 业务逻辑已移至 ProcessingService，handler 只负责 HTTP 请求/响应 + 文件上传。
 type VideoProcessHandler struct {
+	notifier          *service.Notifier
 	logger            *zap.Logger
 	videoService      *service.VideoService
 	processingSvc     *workflow.ProcessingService
@@ -47,8 +48,9 @@ type VideoProcessHandlerParams struct {
 	Cfg               *config.AppConfig
 }
 
-func NewVideoProcessHandler(params VideoProcessHandlerParams) *VideoProcessHandler {
+func NewVideoProcessHandler(params VideoProcessHandlerParams, notifier *service.Notifier) *VideoProcessHandler {
 	return &VideoProcessHandler{
+		notifier:          notifier,
 		logger:            params.Logger,
 		videoService:      params.VideoService,
 		processingSvc:     params.ProcessingSvc,
@@ -171,6 +173,12 @@ func (h *VideoProcessHandler) SubmitLink(c *gin.Context) {
 	}
 	if err != nil {
 		h.videoService.MarkStatus(c.Request.Context(), videoID, model.VideoStatusFailed)
+		if h.notifier != nil {
+			h.notifier.NotifyAsync(c.Request.Context(), service.NotifyPayload{
+				Event: service.NotifyEventVideoFailed, Title: "视频处理失败",
+				Message: err.Error(), VideoID: videoID, UserID: req.UserID, Status: model.VideoStatusFailed,
+			})
+		}
 		c.JSON(http.StatusInternalServerError, VideoProcessResponse{Success: false, Message: "视频处理失败: " + err.Error()})
 		return
 	}
@@ -184,6 +192,27 @@ func (h *VideoProcessHandler) SubmitLink(c *gin.Context) {
 		updates["subtitle_path"] = result.Transcript.SRTPath
 	}
 	h.videoService.UpdateProcessingResult(c.Request.Context(), result.VideoID, updates)
+	if h.notifier != nil {
+		title := result.Title
+		if title == "" {
+			title = result.VideoID
+		}
+		status := model.VideoStatusCompleted
+		evt := service.NotifyEventVideoCompleted
+		nt := "视频处理完成"
+		msg := title
+		if result != nil && result.TranslationSkipped {
+			evt = service.NotifyEventVideoWarning
+			nt = "视频处理完成（无中文字幕）"
+			msg = title + "：翻译/字幕未生成，请检查 LLM 配置或任务链。"
+			status = "completed_without_zh"
+		}
+		h.notifier.NotifyAsync(c.Request.Context(), service.NotifyPayload{
+			Event: evt, Title: nt,
+			Message: msg, VideoID: result.VideoID, UserID: req.UserID, Status: status,
+			Extra: map[string]string{"path": result.VideoPath},
+		})
+	}
 
 	c.JSON(http.StatusOK, VideoProcessResponse{
 		Success: true, Message: "视频处理成功",
@@ -238,6 +267,12 @@ func (h *VideoProcessHandler) SubmitVideo(c *gin.Context) {
 	result, err := h.processingSvc.YouTubeChain().ProcessLocalContextWithTracking(c.Request.Context(), initialCtx, videoID, req.UserID)
 	if err != nil {
 		h.videoService.MarkStatus(c.Request.Context(), videoID, model.VideoStatusFailed)
+		if h.notifier != nil {
+			h.notifier.NotifyAsync(c.Request.Context(), service.NotifyPayload{
+				Event: service.NotifyEventVideoFailed, Title: "本地视频处理失败",
+				Message: err.Error(), VideoID: videoID, UserID: req.UserID, Status: model.VideoStatusFailed,
+			})
+		}
 		c.JSON(http.StatusInternalServerError, VideoProcessResponse{Success: false, Message: "视频处理失败: " + err.Error()})
 		return
 	}
@@ -405,7 +440,7 @@ func (h *VideoProcessHandler) StartAgentOpenJob(job *model.AgentJob, req service
 	default:
 		h.updateJob(job.JobID, map[string]any{
 			"status": "failed", "progress": 100, "stage": "failed",
-			"error_code": "not_implemented",
+			"error_code":    "not_implemented",
 			"error_message": "async tool implementation is not available yet",
 		})
 	}
@@ -535,7 +570,6 @@ func extractVideoIDFromPath(videoPath string) string {
 	}
 	return filename
 }
-
 
 func agentOpenStr(v any) string {
 	if s, ok := v.(string); ok {

@@ -1,8 +1,6 @@
 package bootstrap
 
 import (
-	"fmt"
-
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/difyz9/ytb2bili/internal/config"
 	"github.com/difyz9/ytb2bili/pkg/llm"
@@ -38,7 +36,9 @@ type toolsResult struct {
 func provideChatLLMClient(cfg *config.AppConfig, logger *zap.Logger) (*llm.EinoChatClient, error) {
 	p := cfg.ResolveChatProvider()
 	if p == nil || !p.ToLLMConfig().IsValid() {
-		return nil, fmt.Errorf("对话 LLM 未配置：请在 config.toml 中设置 [chat] 或 [llm] api_key")
+		// 降级而非硬失败：未配置 LLM 时应用仍可启动，依赖 LLM 的功能在运行期跳过。
+		logger.Warn("对话 LLM 未配置：请在 config.toml 中设置 [chat] 或 [llm] api_key，相关功能将被跳过")
+		return nil, nil
 	}
 	return llm.NewClientFromConfig(p.ToLLMConfig(), logger)
 }

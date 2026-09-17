@@ -16,6 +16,11 @@ RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
 # 更新 yt-dlp 至最新版本（修复 YouTube n-challenge 兼容性问题）
 RUN yt-dlp -U || pip install -U yt-dlp || true
 
+# 安装 deno JS 运行时（新版 yt-dlp 处理 YouTube SABR 风控必需）
+RUN apt-get update && apt-get install -y --no-install-recommends unzip \
+    && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh -s -- -y \
+    && rm -rf /var/lib/apt/lists/*
+
 
 # 复制与目标平台匹配的可执行文件和配置文件
 COPY ${APP_BINARY} ./ytb2bili

@@ -508,6 +508,29 @@ func (t *DownloadVideoTool) download(ctx context.Context, videoID string, req Do
 		}
 		lastErr = err
 	}
+
+	// 兜底：所有策略均失败时（常见于数据中心代理 IP 被 YouTube 降级到 360p），
+	// 放宽最低分辨率要求，用首选客户端重试一次，避免整条流水线直接失败。
+	if requiredMinHeight > 0 {
+		t.logger.Warn("All download strategies failed; retrying with relaxed minimum resolution",
+			zap.Int("original_minimum_height", requiredMinHeight),
+			zap.String("video_id", videoID),
+		)
+		requiredMinHeight = 0
+		for _, strategy := range strategies {
+			result, err := tryClient(strategy.label, strategy.extra)
+			if err == nil {
+				return result, nil
+			}
+			lastErr = err
+			t.logger.Warn("Relaxed-resolution attempt failed",
+				zap.String("client", strategy.label),
+				zap.String("reason", compactErrorMessage(err)),
+			)
+			break
+		}
+	}
+
 	if lastErr != nil {
 		return nil, lastErr
 	}

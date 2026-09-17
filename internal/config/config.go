@@ -57,6 +57,11 @@ func getDefaultConfig() *AppConfig {
 		Feishu: FeishuConfig{
 			Enabled: false,
 		},
+		Youtube: YoutubeConfig{
+			ClientID:     "",
+			ClientSecret: "",
+			RedirectURL:  "",
+		},
 		APIAuth: AppAuthConfig{
 			Enabled:           true,
 			AppID:             "ytb2bili_extension",

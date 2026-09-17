@@ -48,6 +48,21 @@ auto_migrate = true
 table_prefix = ""
 
 
+# ============================================================================
+# YouTube OAuth 授权配置（用于"账号绑定→YouTube"登录）
+# 在 Google Cloud Console 创建 OAuth 2.0 客户端后填入：
+#   - client_id / client_secret：凭据页可获取
+#   - redirect_url：必须与 Console「已获授权的重定向 URI」完全一致
+#     若走 Web 应用授权，redirect_url 指向后端回调，例如：
+#     http://127.0.0.1:8096/api/v1/bindings/youtube/callback
+# 三项均非空即启用；也可以不填此文件，改用环境变量
+# YOUTUBE_CLIENT_ID / YOUTUBE_CLIENT_SECRET / YOUTUBE_REDIRECT_URL
+# ============================================================================
+[youtube]
+client_id = ""                 # Google OAuth2 客户端 ID
+client_secret = ""             # Google OAuth2 客户端密钥
+redirect_url = ""              # OAuth 回调地址（需与 Google Console 一致）
+
 
 # ============================================================================
 # 视频处理工作流配置

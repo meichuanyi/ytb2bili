@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -27,6 +28,7 @@ var sharedBindingCache *store.CacheDict
 // YouTubeFeed 表示 YouTube RSS feed 的结构
 type YouTubeFeed struct {
 	XMLName xml.Name       `xml:"feed"`
+	Title   string         `xml:"title"`
 	Entries []YouTubeEntry `xml:"entry"`
 }
 
@@ -79,14 +81,16 @@ type updateSubscriptionStatusRequest struct {
 }
 
 type YouTubeHandler struct {
+	cfg            *config.AppConfig
 	logger         *zap.Logger
 	youtubeClient  *internalservice.YouTubeClientFactory
 	systemSettings *internalservice.SystemSettingsClient
 	youtubeService *internalservice.YouTubeService
 }
 
-func NewYouTubeHandler(logger *zap.Logger, _ *config.AppConfig, youtubeClient *internalservice.YouTubeClientFactory, systemSettings *internalservice.SystemSettingsClient, youtubeService *internalservice.YouTubeService) *YouTubeHandler {
+func NewYouTubeHandler(logger *zap.Logger, cfg *config.AppConfig, youtubeClient *internalservice.YouTubeClientFactory, systemSettings *internalservice.SystemSettingsClient, youtubeService *internalservice.YouTubeService) *YouTubeHandler {
 	return &YouTubeHandler{
+		cfg:            cfg,
 		logger:         logger,
 		youtubeClient:  youtubeClient,
 		systemSettings: systemSettings,
@@ -649,10 +653,11 @@ func (h *YouTubeHandler) GetLatestVideos(c *gin.Context) {
 	var total int64
 	var videos []model.Video
 
-	// 构建查询
+	// 构建查询（展示订阅频道同步来的全部视频，含排队/处理中/已完成/失败，
+	// 因 synced 状态会在自动流水线启动后立即流转，只过滤 synced 会导致列表看不到视频）
 	query := h.youtubeService.GetDB().Model(&model.Video{}).
 		Where("tb_videos.video_id != ? AND tb_videos.video_id IS NOT NULL AND tb_videos.title != ? AND tb_videos.title IS NOT NULL", "", "").
-		Where("tb_videos.status = ?", "synced")
+		Where("tb_videos.status IN ?", []string{"synced", "001", "002", "003", "004"})
 	hasSubscriptionJoin := false
 
 	// 如果有用户ID，只返回该用户的视频
@@ -977,13 +982,29 @@ func (h *YouTubeHandler) fetchYouTubeFeed() {
 	}
 }
 
+// feedHTTPClient 返回用于拉取 YouTube RSS 的 HTTP 客户端；配置了 proxy_url 时走代理，
+// 否则直连（无代理环境下直连 YouTube 会被 DNS 污染/重置）。
+func (h *YouTubeHandler) feedHTTPClient() *http.Client {
+	if h.cfg != nil {
+		if proxy := strings.TrimSpace(h.cfg.Workflow.ProxyURL); proxy != "" {
+			if proxyURL, err := url.Parse(proxy); err == nil {
+				return &http.Client{
+					Timeout: 30 * time.Second,
+					Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+				}
+			}
+		}
+	}
+	return &http.Client{Timeout: 30 * time.Second}
+}
+
 // processSubscriptionFeed 处理单个订阅频道的 feed
 func (h *YouTubeHandler) processSubscriptionFeed(subscription model.TbSubscription, lookbackDays int) {
 	// 构建 RSS feed URL
 	feedURL := fmt.Sprintf("https://www.youtube.com/feeds/videos.xml?channel_id=%s", subscription.ChannelID)
 
 	// 获取 feed
-	resp, err := http.Get(feedURL)
+	resp, err := h.feedHTTPClient().Get(feedURL)
 	if err != nil {
 		h.logger.Warn("Failed to fetch feed",
 			zap.String("channel_id", subscription.ChannelID),
@@ -1006,6 +1027,23 @@ func (h *YouTubeHandler) processSubscriptionFeed(subscription model.TbSubscripti
 			zap.String("channel_id", subscription.ChannelID),
 			zap.Error(err))
 		return
+	}
+
+	// 若订阅记录缺失标题/缩略图，则从 RSS 回填（首次同步后自动补全，无需 YouTube API）
+	if subscription.ChannelTitle == "" || subscription.ChannelThumbnailURL == "" {
+		updates := map[string]interface{}{}
+		if subscription.ChannelTitle == "" && feed.Title != "" {
+			updates["channel_title"] = feed.Title
+		}
+		if subscription.ChannelThumbnailURL == "" && len(feed.Entries) > 0 {
+			updates["channel_thumbnail_url"] = "https://i.ytimg.com/vi/" + feed.Entries[0].VideoID.Value + "/hqdefault.jpg"
+		}
+		if len(updates) > 0 {
+			if err := h.youtubeService.GetDB().Model(&model.TbSubscription{}).
+				Where("id = ?", subscription.ID).Updates(updates).Error; err != nil {
+				h.logger.Warn("回填频道标题/缩略图失败", zap.Error(err))
+			}
+		}
 	}
 
 	h.logger.Info("Feed fetched successfully",
@@ -1331,6 +1369,125 @@ func (h *YouTubeHandler) mergeUserSubscriptions(userID string, subscriptions []*
 	return nil
 }
 
+// channelIDPattern 匹配 YouTube 频道 ID（UC 开头，22 位）
+var channelIDPattern = regexp.MustCompile(`UC[\w-]{22}`)
+
+// AddSubscriptionRequest 通过链接/句柄/ID 添加订阅的请求体
+type AddSubscriptionRequest struct {
+	UserID       string `json:"user_id"`
+	ChannelInput string `json:"channel_input"`
+}
+
+// AddSubscription 通过频道链接/句柄/ID 添加 YouTube 订阅。
+//
+// 无需 YouTube 账号或 API Key。解析优先级：
+//  1. 直接是 channel_id（UCxxxx）或链接含 /channel/UCxxxx —— 无需联网
+//  2. 其他形式（@句柄、视频链接、播放列表）—— 使用 yt-dlp 解析（需可访问 YouTube 的网络）
+//
+// @Router /api/v1/youtube/subscriptions [post]
+func (h *YouTubeHandler) AddSubscription(c *gin.Context) {
+	var req AddSubscriptionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "user_id and channel_input are required")
+		return
+	}
+	req.UserID = strings.TrimSpace(req.UserID)
+	req.ChannelInput = strings.TrimSpace(req.ChannelInput)
+	if req.UserID == "" || req.ChannelInput == "" {
+		BadRequest(c, "user_id and channel_input are required")
+		return
+	}
+
+	channelID, title, thumbnail, err := h.resolveChannel(req.ChannelInput)
+	if err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+
+	now := time.Now()
+	sub := model.TbSubscription{
+		UserID:              req.UserID,
+		ChannelID:           channelID,
+		Platform:            "youtube",
+		ChannelTitle:        title,
+		ChannelThumbnailURL: thumbnail,
+		SubscribedAt:        now,
+		SyncedAt:            now,
+		Status:              "active",
+	}
+
+	// 已存在则更新，不存在则创建（幂等）
+	if err := h.youtubeService.GetDB().
+		Where("user_id = ? AND channel_id = ?", req.UserID, channelID).
+		Assign(sub).
+		FirstOrCreate(&sub).Error; err != nil {
+		h.logger.Error("保存订阅失败", zap.Error(err))
+		InternalServerError(c, "保存订阅失败")
+		return
+	}
+
+	Success(c, gin.H{"subscription": sub})
+}
+
+// resolveChannel 将用户输入解析为 channel_id（并最佳努力获取标题/缩略图）。
+func (h *YouTubeHandler) resolveChannel(input string) (id, title, thumbnail string, err error) {
+	// 1. 直接就是 channel_id：无需联网，直接采用
+	if m := channelIDPattern.FindString(input); m != "" {
+		return m, "", "", nil
+	}
+
+	// 2. 链接中包含 /channel/UCxxxx：无需联网，直接提取
+	if m := regexp.MustCompile(`/channel/(UC[\w-]{22})`).FindStringSubmatch(input); m != nil {
+		return m[1], "", "", nil
+	}
+
+	// 3. 其他形式（@句柄、视频链接、播放列表等）交给 yt-dlp 解析（需要可访问 YouTube 的网络）
+	eid, et, eth, e := h.ytDlpResolve(input)
+	if e != nil {
+		return "", "", "", fmt.Errorf("无法解析该链接：%v；若当前环境无法访问 YouTube，请直接粘贴包含 /channel/UCxxxx 的频道链接", e)
+	}
+	return eid, et, eth, nil
+}
+
+// ytDlpResolve 调用 yt-dlp 解析频道信息（channel_id || channel || channel_thumbnail）。
+func (h *YouTubeHandler) ytDlpResolve(input string) (id, title, thumbnail string, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	args := []string{
+		"--no-warnings",
+		"--playlist-items", "1",
+		"--print", "%(channel_id)s||%(channel)s||%(channel_thumbnail)s",
+	}
+	if h.cfg != nil && strings.TrimSpace(h.cfg.Workflow.ProxyURL) != "" {
+		args = append(args, "--proxy", strings.TrimSpace(h.cfg.Workflow.ProxyURL))
+	}
+	args = append(args, "--", input)
+	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", "", "", fmt.Errorf("yt-dlp 解析失败: %w", err)
+	}
+
+	line := strings.TrimSpace(string(out))
+	if line == "" {
+		return "", "", "", fmt.Errorf("yt-dlp 未返回结果")
+	}
+
+	parts := strings.SplitN(line, "||", 3)
+	id = strings.TrimSpace(parts[0])
+	if id == "" {
+		return "", "", "", fmt.Errorf("未能提取到 channel_id")
+	}
+	if len(parts) > 1 {
+		title = strings.TrimSpace(parts[1])
+	}
+	if len(parts) > 2 {
+		thumbnail = strings.TrimSpace(parts[2])
+	}
+	return id, title, thumbnail, nil
+}
+
 // RegisterRoutes 注册YouTube相关路由
 func (h *YouTubeHandler) RegisterRoutes(r *gin.Engine, authMiddleware ...gin.HandlerFunc) {
 	// var authMW gin.HandlerFunc
@@ -1355,6 +1512,7 @@ func (h *YouTubeHandler) RegisterRoutes(r *gin.Engine, authMiddleware ...gin.Han
 		api.GET("/TbSubscriptions", h.GetUserTbSubscriptions)
 		api.POST("/TbSubscriptions/sync", h.SyncUserTbSubscriptions)
 		api.PATCH("/TbSubscriptions/:id/status", h.UpdateTbSubscriptionStatus)
+		api.POST("/subscriptions", h.AddSubscription)
 	}
 
 	// 新路由格式 (与 web-app 一致)
@@ -1379,6 +1537,7 @@ func (h *YouTubeHandler) RegisterRoutes(r *gin.Engine, authMiddleware ...gin.Han
 			youtube.GET("/TbSubscriptions", h.GetUserTbSubscriptions)
 			youtube.POST("/TbSubscriptions/sync", h.SyncUserTbSubscriptions)
 			youtube.PATCH("/TbSubscriptions/:id/status", h.UpdateTbSubscriptionStatus)
+			youtube.POST("/subscriptions", h.AddSubscription)
 		}
 	}
 }

@@ -96,6 +96,7 @@ interface RerunDraft {
   mode: RerunMode;
   translationModel: string;
   voiceName: string;
+  redownload: boolean;
 }
 
 function buildRerunTaskChainSettings(mode: RerunMode) {
@@ -406,7 +407,7 @@ const fmtAccountLastUsed = (value?: string) => {
   // Fetch tab badge counts (lightweight)
   const fetchCounts = useCallback(async () => {
     try {
-      const res = await fetch('/api/v1/videos/counts?source_type=manual');
+      const res = await fetch('/api/v1/videos/counts');
       const data = await res.json();
       if ((data.code === 0 || data.code === 200) && data.data) {
         setTabCounts(data.data);
@@ -419,7 +420,7 @@ const fmtAccountLastUsed = (value?: string) => {
     try {
       setRefreshing(true);
       const tabParam = activeTab === 'all' ? '' : `&tab=${activeTab}`;
-      const res = await fetch(`/api/v1/videos?source_type=manual&page=${currentPage}&limit=${PAGE_SIZE}${tabParam}`);
+      const res = await fetch(`/api/v1/videos?page=${currentPage}&limit=${PAGE_SIZE}${tabParam}`);
       const data = await res.json();
       if ((data.code === 0 || data.code === 200) && data.data) {
         setVideos(data.data.videos ?? []);
@@ -601,15 +602,21 @@ const fmtAccountLastUsed = (value?: string) => {
       mode,
       translationModel: 'default',
       voiceName: video.speech_voice_name || DEFAULT_SPEECH_SYNTHESIS_CONFIG.voice_name,
+      redownload: false,
     });
   };
 
   const submitRerunDraft = async () => {
     if (!rerunDraft) return;
     const payload: Record<string, unknown> = {
-      restart_from_step: rerunDraft.mode === 'voice' ? 'SynthesizeSubtitleAudio' : 'LLMTranslate',
+      restart_from_step: rerunDraft.redownload
+        ? 'DownloadVideo'
+        : (rerunDraft.mode === 'voice' ? 'SynthesizeSubtitleAudio' : 'LLMTranslate'),
       task_chain_settings: buildRerunTaskChainSettings(rerunDraft.mode),
     };
+    if (rerunDraft.redownload) {
+      payload.force_redownload = true;
+    }
     if (rerunDraft.mode !== 'voice') {
       const modelName = rerunDraft.translationModel.trim();
       if (modelName && modelName !== 'default') {
@@ -1115,6 +1122,20 @@ const fmtAccountLastUsed = (value?: string) => {
                 </div>
               )}
             </div>
+            <label className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={rerunDraft.redownload}
+                onChange={(event) => setRerunDraft(current => current ? { ...current, redownload: event.target.checked } : current)}
+                className="mt-0.5 h-4 w-4"
+              />
+              <span>
+                <span className="font-medium">{t('重新下载视频')}</span>
+                <span className="mt-0.5 block text-xs text-slate-500">
+                  {t('删除本地已下载的视频文件，按当前配置（如新增 Cookies、清晰度）重新下载，后续步骤全部重跑。')}
+                </span>
+              </span>
+            </label>
             {rerunDraft.mode !== 'voice' && (
               <label className="space-y-2 text-sm text-slate-700 block">
                 <span className="font-medium">{t('Translation model')}</span>

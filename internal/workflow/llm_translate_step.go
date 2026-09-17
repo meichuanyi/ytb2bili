@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/difyz9/ytb2bili/internal/config"
+	"github.com/difyz9/ytb2bili/internal/service"
 	"github.com/difyz9/ytb2bili/pkg/llm"
 	"github.com/difyz9/ytb2bili/pkg/tools"
 	"go.uber.org/fx"
@@ -24,6 +25,7 @@ type LLMTranslateStep struct {
 	translator  *tools.BatchTranslator
 	logger      *zap.Logger
 	downloadDir string
+	notifier    *service.Notifier
 }
 
 type LLMTranslateStepParams struct {
@@ -33,7 +35,7 @@ type LLMTranslateStepParams struct {
 	AppConfig  *config.AppConfig `optional:"true"`
 }
 
-func NewLLMTranslateStep(params LLMTranslateStepParams) *LLMTranslateStep {
+func NewLLMTranslateStep(params LLMTranslateStepParams, notifier *service.Notifier) *LLMTranslateStep {
 	translator := params.Translator
 	if translator == nil && params.AppConfig != nil {
 		p := params.AppConfig.ResolveTranslationProvider()
@@ -60,7 +62,8 @@ func NewLLMTranslateStep(params LLMTranslateStepParams) *LLMTranslateStep {
 	}
 
 	return &LLMTranslateStep{
-		BaseStep:    NewBaseStepWithOrder(StepNameLLMTranslate, false, 6),
+		notifier:   notifier,
+		BaseStep:    NewBaseStepWithOrder(StepNameLLMTranslate, true, 6),
 		translator:  translator,
 		logger:      params.Logger,
 		downloadDir: downloadDir,
@@ -81,8 +84,18 @@ func (s *LLMTranslateStep) Execute(ctx context.Context, input any) (any, error) 
 	segments := collectTranscriptTextSegments(vctx.Transcript)
 	if len(segments) == 0 {
 		vctx.TranslationSkipped = true
-		s.logger.Warn("No transcript available, skipping LLM subtitle translation")
-		return vctx, nil
+		s.logger.Error("No transcript available for LLM subtitle translation")
+		if s.notifier != nil {
+			s.notifier.NotifyAsync(ctx, service.NotifyPayload{
+				Event:   service.NotifyEventVideoFailed,
+				Title:   "字幕翻译失败",
+				Message: "原因：没有可用转写文本（Transcribe 失败或字幕为空）。任务已中止，不会继续上传。请检查转写服务后重试。",
+				VideoID: vctx.VideoID,
+				UserID:  vctx.UserID,
+				Status:  "no_transcript",
+			})
+		}
+		return nil, fmt.Errorf("字幕翻译失败: 没有可用转写文本")
 	}
 
 	s.logger.Info("Starting LLM subtitle translation",
@@ -107,9 +120,17 @@ func (s *LLMTranslateStep) Execute(ctx context.Context, input any) (any, error) 
 	result, err := s.translator.TranslateTextsWithConfig(ctx, texts, runConfig)
 	if err != nil {
 		s.logger.Error("LLM subtitle translation failed", zap.Error(err))
-		return vctx, &StepSkippedError{
-			Step: s.Name(), Cause: err, Output: vctx,
+		if s.notifier != nil {
+			s.notifier.NotifyAsync(ctx, service.NotifyPayload{
+				Event:   service.NotifyEventVideoFailed,
+				Title:   "字幕翻译失败",
+				Message: fmt.Sprintf("原因：%v\n任务已中止，不会继续上传。请修复 LLM 后重新处理该视频。", err),
+				VideoID: vctx.VideoID,
+				UserID:  vctx.UserID,
+				Status:  "translate_failed",
+			})
 		}
+		return nil, fmt.Errorf("字幕翻译失败: %w", err)
 	}
 	vctx.TranslationSkipped = result.SkippedTranslation
 	vctx.SubtitleAudios = buildSubtitleAudiosFromTranslations(segments, result.TranslatedTexts)
@@ -121,7 +142,7 @@ func (s *LLMTranslateStep) Execute(ctx context.Context, input any) (any, error) 
 		zap.Duration("duration", result.Duration))
 
 	if err := s.saveTranslatedSubtitles(vctx); err != nil {
-		return vctx, &StepSkippedError{Step: s.Name(), Cause: err, Output: vctx}
+		return nil, fmt.Errorf("保存翻译字幕失败: %w", err)
 	}
 
 	return vctx, nil
