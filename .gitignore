@@ -106,3 +106,6 @@ wheels/
 /config.toml
 /docker/config.toml
 /cookies/
+
+# 内部工作笔记（不入库）
+/docs/WORK_NOTES.md
