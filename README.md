@@ -15,6 +15,23 @@ Language: [English](README.en.md) | [简体中文](README.zh-CN.md) | [日本語
 
 ytb2bili is a video workflow system for local video translation playback and YouTube-to-Bilibili publishing. It combines a Go backend, a Next.js web console, subtitle processing, AI copy generation, subtitle voice synthesis, synchronized audio/video playback, and Bilibili upload automation.
 
+## Fork Enhancements (vs upstream)
+
+> This repository is a fork of [difyz9/ytb2bili](https://github.com/difyz9/ytb2bili) with the following additions:
+
+- **Task event notifications**: new `[notify]` config section and notifier service — push task completed/failed, Bilibili upload success/warning events to generic Webhook, ntfy, MagicPush, Bark, or Telegram; new "Notifications" section in the web settings page.
+- **Full-video Chinese dubbing (DubAudio step)**: mixes per-subtitle TTS segments into the video audio track on the subtitle timeline (original audio ducked as background), wired into the main processing chain.
+- **Edge TTS availability fix**: implements Microsoft's `Sec-MS-GEC` token and WebSocket protocol — upstream's plain REST calls were deprecated by Microsoft, this restores the free Edge voices.
+- **Starts without LLM configured**: upstream fails to boot when the chat LLM is missing; this fork degrades to a warning and skips LLM-dependent features at runtime instead.
+- **Download fallback retry**: when all download strategies fail (typically datacenter IPs being throttled to 360p by YouTube), retries once with relaxed minimum resolution instead of failing the whole pipeline.
+- **Automatic retry of failed tasks**: a background cron job scans failed videos and reprocesses them up to a retry cap.
+- **Self-hosted membership unlock**: local deployments unlock all membership tiers, avoiding features locked behind the removed membership backend.
+- **Promo text in upload description off by default**: now appended only when explicitly enabled in settings.
+- **YouTube OAuth via environment variables**: `YOUTUBE_CLIENT_ID` / `YOUTUBE_CLIENT_SECRET` / `YOUTUBE_REDIRECT_URL` can override the config file; wired into docker-compose.
+- **HTTP access log middleware**: structured request logging (includes Origin/Referer, never credential headers) with noise reduction for static assets.
+- **Subtitle translation is now a required step**: LLM translation failures no longer pass silently; combined with notifications they are immediately visible.
+- **Docs & tooling**: added a Chinese architecture document `docs/ARCHITECTURE.md` (layering, Step/Chain workflow model, end-to-end data flow) and a Whisper transcription helper script `tools/whisper_transcribe.py`.
+
 ## Overview
 
 - Local video translation and review with subtitles, voiceover, and synchronized playback.

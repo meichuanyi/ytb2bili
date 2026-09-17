@@ -108,7 +108,7 @@ enabled = false
 # 通用 JSON webhook（自定义接收端）
 # webhook_url = "http://127.0.0.1:8080/hooks/ytb2bili"
 # ntfy_url = "http://127.0.0.1:8090/ytb2bili"
-# magicpush_url = "http://192.168.6.108:818/api/push/YOUR_TOKEN"
+# magicpush_url = "http://192.168.1.100:818/api/push/YOUR_TOKEN"
 # bark_url = "https://api.day.app/YOUR_KEY"
 # telegram_bot_token = ""
 # telegram_chat_id = ""

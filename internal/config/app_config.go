@@ -89,7 +89,7 @@ type NotifyConfig struct {
 	// TelegramBotToken + TelegramChatID
 	TelegramBotToken string `toml:"telegram_bot_token"`
 	TelegramChatID   string `toml:"telegram_chat_id"`
-	// MagicPushURL 形如 http://192.168.6.108:818/api/push/<TOKEN>
+	// MagicPushURL 形如 http://192.168.1.100:818/api/push/<TOKEN>
 	MagicPushURL string `toml:"magicpush_url"`
 	// 钉钉/飞书/企微自定义机器人 webhook
 	DingTalkWebhook  string `toml:"dingtalk_webhook"`
